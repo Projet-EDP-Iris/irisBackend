@@ -1,0 +1,20 @@
+# Environment
+.venv/
+venv/
+poetry.lock
+.python-version
+
+# Byte-compiled / object files
+__pycache__/
+*.pyc
+*.o
+*.so
+
+# Editor/OS Files
+.DS_Store
+.vscode/
+.idea/
+
+# Testing/Artifacts
+.pytest_cache/
+htmlcov/

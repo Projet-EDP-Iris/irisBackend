@@ -3,11 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import uvicorn
+import app.core.config import settings
 
 #Initialization
 app = FastAPI(
-        title="Iris App",
-        description="This is the Iris API",
+        title=settings.PROJECT_NAME,
+        description="This is the Iri:s API",
         version="0.1.0",
 )
 

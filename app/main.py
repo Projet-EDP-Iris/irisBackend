@@ -3,7 +3,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import RedirectResponse
 import uvicorn
-import app.core.config import settings
+from app.core.config import settings
+from app.api.routes import users
+from app.core.config import settings
 
 #Initialization
 app = FastAPI(
@@ -11,6 +13,8 @@ app = FastAPI(
         description="This is the Iri:s API",
         version="0.1.0",
 )
+
+app.include_router(users.router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

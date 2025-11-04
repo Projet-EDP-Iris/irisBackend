@@ -7,11 +7,8 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Iris"
 
     #Database Settings (Placeholder)
-    POSTGRES_USER: Optional[str] = None
-    POSTGRES_PASSWORD: Optional[str] = None
-    POSTGRES_SERVER: Optional[str] = None
-    POSTGRES_PORT: Optional[str] = None
-    POSTGRES_DB: Optional[str] = None
+    DATABASE_URL: str
+    SECRET_KEY: str
 
     #NLP Settings
     NLP_MODEL_PATH: str = "fr_core_news_sm" #default name
@@ -20,7 +17,5 @@ class Settings(BaseSettings):
         env_file = ".env"
         case_sensitive = True
 
-    #Singleton
-    settings = Settings()
-
+settings = Settings()
 

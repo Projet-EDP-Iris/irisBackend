@@ -1,0 +1,47 @@
+name: Run Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: poetry install
+
+      - name: Prepare test database (SQLite)
+        env:
+          DATABASE_URL: sqlite:///./.test.db
+        run: |
+          poetry run python - <<'PY'
+          from app.db.database import engine
+          from app.models.user import User
+          from app.models.base import Base
+          Base.metadata.create_all(bind=engine)
+          PY
+
+      - name: Run tests
+        env:
+          DATABASE_URL: sqlite:///./.test.db
+        run: poetry run pytest -v

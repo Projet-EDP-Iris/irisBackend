@@ -1,4 +1,5 @@
-from typing import Annotated
+from typing import Annotated, Optional
+from datetime import datetime
 from pydantic import BaseModel, EmailStr, StringConstraints, field_validator
 import re
 
@@ -17,3 +18,48 @@ class UserCreate(BaseModel):
         if not re.search(r"[@$!%*?&]", v):
             raise ValueError("Password must include at least one special character @$!%*?&")
         return v
+
+class UserResponse(BaseModel):
+    id: int
+    email: EmailStr
+    role: str
+    has_subscription: bool
+    bank_account_id: Optional[str] = None
+    oauth_provider: Optional[str] = None
+    require_password_reset: bool
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class UserUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    password: Optional[Password] = None
+    role: Optional[str] = None
+    has_subscription: Optional[bool] = None
+    bank_account_id: Optional[str] = None
+
+    @field_validator("password")
+    @classmethod
+    def strong_password(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        if not re.search(r"\d", v):
+            raise ValueError("Password must include at least one digit")
+        if not re.search(r"[@$!%*?&]", v):
+            raise ValueError("Password must include at least one special character @$!%*?&")
+        return v
+
+class LoginRequest(BaseModel):
+    email: EmailStr
+    password: str
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+class TokenPayload(BaseModel):
+    sub: str
+    exp: int
+    iat: int

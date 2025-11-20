@@ -12,4 +12,6 @@ class User(Base, TimestampMixin):
     has_subscription: Mapped[bool] = mapped_column(Boolean, default=False)
     bank_account_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     oauth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    require_password_reset: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
 

@@ -7,8 +7,10 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "Iris"
 
     #Database Settings (Placeholder)
-    DATABASE_URL: str
-    SECRET_KEY: str
+    DATABASE_URL: str = "sqlite///./test.db"
+    SECRET_KEY: str = "test-secret"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     #NLP Settings
     NLP_MODEL_PATH: str = "fr_core_news_sm" #default name

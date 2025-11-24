@@ -1,56 +1,107 @@
 # Iris Backend API
 
-This repo contains the backend API for the Iris application, built using **FastAPI** and **Python 3.12** and using **SQLAlchemy for Postgres** (Supabase) and **Pydantic** for validation.
+This repo contains the backend API for the Iris application, built using **FastAPI** and **Python 3.12** and using **SQLAlchemy for PostgreSQL** and **Pydantic** for validation.
 
 The backend manages user data, events, scheduling, and integrates a custom **NLP/NER** (Named Entity Recognition) pipeline for processing email content.
 
-Backend API for the Iris application built with FastAPI and Python 3.12, using SQLAlchemy for Postgres (Supabase) and Pydantic for validation.
-It includes automatic interactive API documentation at /docs (Swagger UI) and /redoc (ReDoc) generated from the app’s OpenAPI schema.
+## Prerequisites
 
-## 🚀 Getting Started
+- Python 3.12+
+- Poetry (package manager)
+- Docker Desktop
 
-## Features
-- FastAPI app with a users endpoint and input validation via Pydantic schemas.
-- SQLAlchemy ORM models backed by a Supabase Postgres database via a standard connection URL.
-- Argon2 password hashing via passlib/argon2-cffi following OWASP guidance for password storage.
-- Auto-generated docs available at /docs and /redoc for quick testing and team onboarding.
+## Quick Start
 
-### Prerequisites/Requirements
+1. **Clone repository**
+   ```bash
+   git clone <repository-url>
+   cd irisBackend
+   ```
 
-* Python 3.12+
-* Poetry (for dependency management)
+2. **Install dependencies**
+   ```bash
+   poetry install
+   ```
 
-### Setup
+3. **Configure environment**
+   ```bash
+   cp .env.example .env
+   # Edit .env if needed (defaults work for local development)
+   ```
 
-1.  **Clone the repository:**
-    ```bash
-    git clone [YOUR_REPO_URL]
-    cd irisBackend
-    ```
+4. **Start Docker services**
+   ```bash
+   docker-compose up -d
+   ```
 
-2.  **Install dependencies using Poetry:**
-    ```bash
-    poetry install
-    ```
+5. **Verify database is running**
+   ```bash
+   docker-compose ps
+   # Should show iris_postgres as "Up"
+   ```
 
+6. **Run application**
+   ```bash
+   poetry run uvicorn app.main:app --reload
+   ```
 
-3. Configure environment (.env in repo root)  
-    ```bash
-    DATABASE_URL=postgresql://<user>:<pass>@db.<ref>.supabase.co:5432/postgres
-    SECRET_KEY=<random-32+chars>
-    ```
+7. **Access API documentation**
+   - Swagger UI: http://localhost:8000/docs
+   - ReDoc: http://localhost:8000/redoc
 
-4. Run the dev server  
-poetry run uvicorn app.main:app --reload
-    ```bash
-    Open http://127.0.0.1:8000/docs for Swagger UI or http://127.0.0.1:8000/redoc for ReDoc to explore and test the API.
-    ```
+## Docker Commands
 
-## Tests
-    ```bash
-    poetry run pytest -v
-    ```
-This runs the test suite against your FastAPI app and verifies endpoint behavior. [web:6]
+**Start services:**
+```bash
+docker-compose up -d
+```
+
+**Stop services:**
+```bash
+docker-compose down
+```
+
+**View logs:**
+```bash
+docker-compose logs -f postgres
+```
+
+**Reset database (delete all data):**
+```bash
+docker-compose down -v
+docker-compose up -d
+```
+
+**Access PostgreSQL shell:**
+```bash
+docker-compose exec postgres psql -U iris_user -d iris_db
+```
+
+## Testing
+
+```bash
+# Run all tests
+poetry run pytest -v
+
+# Run specific test file
+poetry run pytest tests/test_user_api.py -v
+```
+
+## Troubleshooting
+
+**Port 5432 already in use:**
+- Another PostgreSQL instance is running
+- Stop it: `brew services stop postgresql` (macOS)
+- Or change Docker port in `docker-compose.yml`: `"5433:5432"`
+
+**"Connection refused" error:**
+- Ensure Docker is running: `docker-compose ps`
+- Check logs: `docker-compose logs postgres`
+- Restart services: `docker-compose restart`
+
+**"Authentication failed" error:**
+- Verify `.env` credentials match `docker-compose.yml`
+- DATABASE_URL should use `iris_user:iris_password`
 
 ## 📂 Project Structure
 ```
@@ -70,7 +121,101 @@ irisBackend/
 └── README.md
 ```
 
-## Notes
-- Docs are enabled by default in FastAPI; you can customize or move them with docs_url/redoc_url if needed.
-- Consider adding OAuth2 + JWT later so clients can log in and call protected endpoints with a Bearer token.
-- For production schema changes, consider Alembic migrations instead of create_all for better change tracking.
+## Contributing to Iris
+
+### Daily Development Workflow
+
+**Starting work:**
+```bash
+# Start Docker services
+docker-compose up -d
+
+# Verify services are healthy
+docker-compose ps
+
+# Run application
+poetry run uvicorn app.main:app --reload
+```
+
+**Ending work:**
+```bash
+# Stop Docker services (optional - saves resources)
+docker-compose down
+```
+
+### Database Operations
+
+**Reset database (clean slate):**
+```bash
+docker-compose down -v
+docker-compose up -d
+```
+
+**Inspect database:**
+```bash
+# Access PostgreSQL shell
+docker-compose exec postgres psql -U iris_user -d iris_db
+
+# List tables
+\dt
+
+# Query users
+SELECT * FROM users;
+
+# Exit
+\q
+```
+
+### Running Tests
+
+```bash
+# Run all tests
+poetry run pytest -v
+
+# Run with coverage report
+poetry run pytest --cov=app tests/
+```
+
+### Git Workflow
+
+1. Create feature branch: `git checkout -b feature/your-feature-name`
+2. Make changes and commit: `git commit -m "Description"`
+3. Push to remote: `git push origin feature/your-feature-name`
+4. Create Pull Request on GitHub
+5. Wait for tests to pass (GitHub Actions)
+6. Request code review
+7. Merge after approval
+
+### Code Style
+
+- Follow PEP 8 style guidelines
+- Use type hints for function parameters and return values
+- Write docstrings for all functions and classes
+- Keep functions focused and single-purpose
+- Use meaningful variable names
+
+### Testing Guidelines
+
+- Write tests for all new features
+- Maintain test coverage above 80%
+- Use descriptive test names that explain what is being tested
+- Include both positive and negative test cases
+
+### Common Issues
+
+**"ModuleNotFoundError":**
+- Run `poetry install` to install dependencies
+
+**"Connection refused" to database:**
+- Run `docker-compose up -d` to start PostgreSQL
+- Check logs: `docker-compose logs postgres`
+
+**"Port 5432 already in use":**
+- Another PostgreSQL is running on your system
+- Stop it or change port in `docker-compose.yml` to `5433:5432`
+- Update `.env` to use port 5433
+
+**Docker containers won't start:**
+- Ensure Docker Desktop is running
+- Restart Docker Desktop
+- Run `docker-compose down` then `docker-compose up -d`

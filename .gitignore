@@ -37,3 +37,11 @@ build/
 dist/
 *.egg-info/
 
+# Docker
+docker-compose.override.yml
+
+# Database
+*.db
+*.db-journal
+test.db
+

@@ -1,0 +1,79 @@
+# Render Blueprint for Iris Backend
+# This file defines all infrastructure needed for the Iris API
+
+services:
+  # PostgreSQL Database Service
+  - type: pserv
+    name: iris-postgres
+    env: docker
+    plan: free  # Change to 'free' for free tier, or 'starter'/'standard' for paid
+    region: oregon  # Choose: oregon, frankfurt, singapore, ohio
+    # Database will be created automatically by Render
+    # Credentials will be auto-generated and available via environment variables
+    ipAllowList: []  # Empty = allow all; add IPs to restrict access
+
+  # FastAPI Web Service
+  - type: web
+    name: iris-backend
+    env: python
+    region: oregon  # Should match database region for best performance
+    plan: free  # Change to 'free' for free tier (note: free services sleep after 15 min of inactivity)
+
+    # Build Configuration
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+      python -m spacy download en_core_web_lg
+      python -m spacy download fr_core_news_sm
+      python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
+
+    # Start Command
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+
+    # Health Check
+    healthCheckPath: /health
+
+    # Auto-Deploy
+    branch: main  # Deploy from main branch
+    autoDeploy: true  # Auto-deploy on git push
+
+    # Environment Variables
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: iris-postgres
+          property: connectionString
+
+      - key: SECRET_KEY
+        generateValue: true  # Auto-generate a secure secret key
+
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 60
+
+      - key: ALGORITHM
+        value: HS256
+
+      - key: PROJECT_NAME
+        value: Iris API
+
+      - key: PYTHON_VERSION
+        value: 3.12.0
+
+      # Environment setting (helps with logging and behavior)
+      - key: ENVIRONMENT
+        value: production
+
+# Optional: Background Workers (for future async tasks like email processing)
+# Uncomment when you add background job processing
+# - type: worker
+#   name: iris-worker
+#   env: python
+#   region: oregon
+#   plan: starter
+#   buildCommand: pip install -r requirements.txt
+#   startCommand: python -m app.workers.email_processor
+#   envVars:
+#     - key: DATABASE_URL
+#       fromDatabase:
+#         name: iris-postgres
+#         property: connectionString

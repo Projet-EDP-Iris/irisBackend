@@ -18,7 +18,7 @@ dnspython==2.8.0
 ecdsa==0.19.1
 email-validator==2.3.0
 fastapi==0.117.1
-greenlet==3.2.4 and (platform_machine == "aarch64" or platform_machine == "ppc64le" or platform_machine == "x86_64" or platform_machine == "amd64" or platform_machine == "AMD64" or platform_machine == "win32" or platform_machine == "WIN32")
+greenlet==3.2.4
 h11==0.16.0
 idna==3.10
 iniconfig==2.1.0
@@ -39,7 +39,7 @@ pluggy==1.6.0
 preshed==3.0.10
 psycopg2-binary==2.9.11
 pyasn1==0.6.1
-pycparser==2.23 and implementation_name != "PyPy"
+pycparser==2.23
 pydantic-core==2.33.2
 pydantic-settings==2.11.0
 pydantic==2.11.9

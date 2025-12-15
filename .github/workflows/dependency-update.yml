@@ -1,0 +1,38 @@
+name: Dependency Updates
+
+on:
+  schedule:
+    # Run weekly on Mondays at 10am UTC
+    - cron: '0 10 * * 1'
+  workflow_dispatch: # Allow manual triggering
+
+jobs:
+  update-dependencies:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Install Poetry
+        run: |
+          curl -sSL https://install.python-poetry.org | python3 -
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Update dependencies
+        run: |
+          poetry update --dry-run > dependency-updates.txt
+          cat dependency-updates.txt
+
+      - name: Upload dependency update report
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-updates
+          path: dependency-updates.txt
+
+      - name: Check for outdated packages
+        run: poetry show --outdated || true

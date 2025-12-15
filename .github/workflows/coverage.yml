@@ -1,4 +1,4 @@
-name: Run Tests
+name: Code Coverage
 
 on:
   pull_request:
@@ -7,24 +7,20 @@ on:
     branches: [main]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: coverage-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  test:
+  coverage:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.12']
-      fail-fast: false
 
     steps:
       - uses: actions/checkout@v3
 
-      - name: Set up Python ${{ matrix.python-version }}
+      - name: Set up Python 3.12
         uses: actions/setup-python@v4
         with:
-          python-version: ${{ matrix.python-version }}
+          python-version: '3.12'
 
       - name: Install Poetry
         run: |
@@ -40,21 +36,31 @@ jobs:
         run: |
           poetry run python - <<'PY'
           from app.db.database import engine
-          from app.models import Base, User  # Import all models before create_all
+          from app.models import Base, User
           Base.metadata.create_all(bind=engine)
           PY
 
-      - name: Run tests
+      - name: Run tests with coverage
         env:
           DATABASE_URL: sqlite:///./.test.db
-        run: poetry run pytest -v --tb=short
+        run: |
+          poetry run pytest --cov=app --cov-report=xml --cov-report=html --cov-report=term
 
-      - name: Upload test results
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.xml
+          flags: unittests
+          name: codecov-umbrella
+          fail_ci_if_error: false
+
+      - name: Upload HTML coverage report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results-${{ matrix.python-version }}
-          path: |
-            .pytest_cache/
-            test-results.xml
-          retention-days: 30
+          name: coverage-html-report
+          path: htmlcov/
+
+      - name: Check coverage threshold
+        run: |
+          poetry run pytest --cov=app --cov-fail-under=60 || echo "Warning: Coverage below 60%"

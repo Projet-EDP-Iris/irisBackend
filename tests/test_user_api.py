@@ -2,9 +2,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from app.db.database import get_db
 from app.main import app
 from app.models.base import Base
-from app.db.database import get_db
 
 # Create a test database engine (in-memory SQLite)
 TEST_DATABASE_URL = "sqlite:///./test.db"
@@ -340,7 +341,7 @@ def test_update_other_user_forbidden():
             "role": "regular"
         }
     )
-    user1_id = user1_response.json()["id"]
+    _ = user1_response.json()["id"]  # noqa: F841
 
     user2_response = client.post(
         "/users/",
@@ -451,7 +452,7 @@ def test_delete_own_user():
 def test_delete_other_user_forbidden():
     """Test regular user cannot delete another user"""
     # Create two users
-    user1_response = client.post(
+    _ = client.post(  # noqa: F841
         "/users/",
         json={
             "email": "user1@example.com",

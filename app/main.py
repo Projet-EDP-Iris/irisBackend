@@ -1,11 +1,12 @@
+import os
+
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
-import uvicorn
-import os
-from app.core.config import settings
+
 from app.api.routes import users
+from app.core.config import settings
 from app.db.database import init_db
 
 #Initialization

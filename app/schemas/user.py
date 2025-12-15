@@ -1,7 +1,8 @@
-from typing import Annotated, Optional
-from datetime import datetime
-from pydantic import BaseModel, EmailStr, StringConstraints, field_validator
 import re
+from datetime import datetime
+from typing import Annotated
+
+from pydantic import BaseModel, EmailStr, StringConstraints, field_validator
 
 Password = Annotated[str, StringConstraints(min_length=8, max_length=14)]
 
@@ -24,8 +25,8 @@ class UserResponse(BaseModel):
     email: EmailStr
     role: str
     has_subscription: bool
-    bank_account_id: Optional[str] = None
-    oauth_provider: Optional[str] = None
+    bank_account_id: str | None = None
+    oauth_provider: str | None = None
     require_password_reset: bool
     created_at: datetime
     updated_at: datetime
@@ -34,11 +35,11 @@ class UserResponse(BaseModel):
         from_attributes = True
 
 class UserUpdate(BaseModel):
-    email: Optional[EmailStr] = None
-    password: Optional[Password] = None
-    role: Optional[str] = None
-    has_subscription: Optional[bool] = None
-    bank_account_id: Optional[str] = None
+    email: EmailStr | None = None
+    password: Password | None = None
+    role: str | None = None
+    has_subscription: bool | None = None
+    bank_account_id: str | None = None
 
     @field_validator("password")
     @classmethod

@@ -2,6 +2,7 @@ from pydantic_settings import BaseSettings
 from pydantic import Field
 from typing import Optional
 import os
+from pathlib import Path
 
 class Settings(BaseSettings):
     #API Settings
@@ -18,8 +19,9 @@ class Settings(BaseSettings):
     NLP_MODEL_PATH: str = "fr_core_news_sm" #default name
 
     class Config:
-        # Only load .env file if not in production
-        env_file = ".env" if os.getenv("ENVIRONMENT") != "production" else None
+        # Only load .env if DATABASE_URL is not already set in environment
+        # This prevents local .env from overriding Render's environment variables
+        env_file = ".env" if not os.getenv("DATABASE_URL") else None
         case_sensitive = True
 
 settings = Settings()

@@ -1,13 +1,15 @@
 name: Docker Build
 
+# Completely disabled until Dockerfile is created
+# Uncomment the 'on' section below when ready to enable
 on:
-  # Disabled until Dockerfile is created
-  # pull_request:
-  #   branches: [main]
-  push:
-    branches: [main]
-    tags:
-      - 'v*'
+  workflow_dispatch:  # Only allow manual triggering for now
+
+# on:
+#   push:
+#     branches: [main]
+#     tags:
+#       - 'v*'
 
 concurrency:
   group: docker-${{ github.ref }}

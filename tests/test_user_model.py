@@ -1,5 +1,6 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
 # Import all models to ensure they're registered with Base.metadata before create_all()
 from app.models import Base, User
 

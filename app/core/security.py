@@ -1,6 +1,7 @@
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
-from jose import jwt, JWTError
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 # Use Argon2 for OWASP-compliant password hashing
@@ -14,9 +15,9 @@ def verify_password(plain: str, hashed: str) -> bool:
     """Verify a plain text password against a hashed password."""
     return pwd_context.verify(plain, hashed)
 
-def create_access_token(subject: str, data: Dict[str, Any], *, secret: str, algorithm: str, minutes: int) -> str:
+def create_access_token(subject: str, data: dict[str, Any], *, secret: str, algorithm: str, minutes: int) -> str:
     """Create a signed JWT access token for successful authentication."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "sub": subject,
         "iat": int(now.timestamp()),
@@ -25,7 +26,7 @@ def create_access_token(subject: str, data: Dict[str, Any], *, secret: str, algo
     }
     return jwt.encode(payload, secret, algorithm=algorithm)
 
-def decode_access_token(token: str, secret: str, algorithm: str) -> Optional[Dict[str, Any]]:
+def decode_access_token(token: str, secret: str, algorithm: str) -> dict[str, Any] | None:
     """Decode and validate a JWT access token. Returns payload if valid, None otherwise."""
     try:
         payload = jwt.decode(token, secret, algorithms=[algorithm])

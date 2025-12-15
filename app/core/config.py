@@ -1,8 +1,7 @@
-from pydantic_settings import BaseSettings
-from pydantic import Field
-from typing import Optional
 import os
-from pathlib import Path
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     #API Settings

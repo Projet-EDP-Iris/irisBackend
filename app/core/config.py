@@ -3,6 +3,7 @@ import os
 from pydantic import Field
 from pydantic_settings import BaseSettings
 
+
 class Settings(BaseSettings):
     #API Settings
     API_V1_STR: str = "/api/v1"

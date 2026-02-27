@@ -5,7 +5,7 @@ from app.core.config import settings
 
 # Import Base and all models to ensure they're registered with Base.metadata
 # This MUST be done before calling Base.metadata.create_all()
-from app.models import Base, User  # noqa: F401
+from app.models import Base, DetectionFeedback, User  # noqa: F401
 
 if settings.DATABASE_URL.startswith("sqlite"):
     engine = create_engine(

@@ -16,7 +16,9 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 
     #NLP Settings
-    NLP_MODEL_PATH: str = "fr_core_news_sm" #default name
+    NLP_MODEL_PATH: str = "fr_core_news_sm"
+    OPENAI_API_KEY: str | None = Field(default=None, env="OPENAI_API_KEY")
+    LLM_CONFIDENCE_THRESHOLD: float = Field(default=0.6, env="LLM_CONFIDENCE_THRESHOLD")
 
     class Config:
         # Only load .env if DATABASE_URL is not already set in environment

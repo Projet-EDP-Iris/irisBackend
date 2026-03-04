@@ -10,6 +10,7 @@ class DetectionData(BaseModel):
     participants: List[str] = []
     context_user_id: str
 
+
 # créneau
 class RecommendedSlot(BaseModel):
     start_time: datetime

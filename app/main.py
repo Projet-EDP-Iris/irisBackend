@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import users
+from app.api.endpoints import prediction 
 from app.core.config import settings
 from app.db.database import init_db
 
@@ -25,7 +26,8 @@ def startup_event():
     """
     init_db()
 
-app.include_router(users.router)
+app.include_router(users.router, prefix="/users", tags=["users"])
+app.include_router(prediction.router, prefix="/api/v1", tags=["prediction"])
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

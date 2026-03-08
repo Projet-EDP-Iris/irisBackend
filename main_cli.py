@@ -37,17 +37,6 @@ def main():
     try:
         gmail_service = GmailService()
         
-        # --- AUTO-FETCH ON STARTUP ---
-        accounts = gmail_service.list_registered_accounts()
-        if accounts:
-            first_account = accounts[0]
-            print(f"\n🚀 Lancement automatique pour : {first_account}")
-            if gmail_service.authenticate_existing_account(first_account):
-                display_emails(gmail_service)
-                print("\nAppuyez sur [Entrée] pour accéder au menu principal...")
-                input()
-        # -----------------------------
-
         while True:
             accounts = gmail_service.list_registered_accounts()
             print_menu(accounts)

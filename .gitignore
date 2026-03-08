@@ -5,6 +5,8 @@
 venv/
 poetry.lock
 .python-version
+credentials.json
+tokens/
 
 # Byte-compiled / object files
 __pycache__/

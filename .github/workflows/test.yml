@@ -40,7 +40,7 @@ jobs:
         run: |
           poetry run python - <<'PY'
           from app.db.database import engine
-          from app.models import Base, User  # Import all models before create_all
+          from app.models import Base, User, DetectionFeedback  # ensure all models registered
           Base.metadata.create_all(bind=engine)
           PY
 

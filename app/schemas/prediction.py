@@ -1,6 +1,5 @@
 from datetime import datetime
 from enum import Enum
-from typing import Optional, Union
 
 from pydantic import BaseModel
 
@@ -27,7 +26,7 @@ class CalendarAvailability(BaseModel):
 
 
 class PredictSlotsFromDetectionRequest(BaseModel):
-    extraction: Union[ExtractionResult, list[ExtractionResult]]
+    extraction: ExtractionResult | list[ExtractionResult]
     preferences: UserPreferences | None = None
     calendar: CalendarAvailability | None = None
 
@@ -42,4 +41,4 @@ class RecommendedSlot(BaseModel):
 class PredictionResponse(BaseModel):
     suggested_slots: list[RecommendedSlot]
     status: PredictionStatus = PredictionStatus.READY_TO_SCHEDULE
-    message: Optional[str] = None
+    message: str | None = None

@@ -2,8 +2,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-
-from app.schemas.detection import EmailInput
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -11,6 +9,7 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.main import app
 from app.models import Base
+from app.schemas.detection import EmailInput
 
 TEST_DATABASE_URL = "sqlite:///./test_emails.db"
 test_engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
@@ -80,9 +79,9 @@ def test_get_emails_not_connected_returns_404(client_with_db, setup_database, au
 
 
 @patch("app.api.endpoints.emails.GmailService")
-def test_get_emails_returns_list_with_subject_body_message_id(MockGmail, client_with_db, setup_database, auth_headers):
+def test_get_emails_returns_list_with_subject_body_message_id(mock_gmail, client_with_db, setup_database, auth_headers):
     mock_svc = MagicMock()
-    MockGmail.return_value = mock_svc
+    mock_gmail.return_value = mock_svc
     mock_svc.authenticate_for_user.return_value = True
     mock_svc.fetch_recent_emails.return_value = [
         {"subject": "Test", "body": "Body text", "message_id": "msg_1", "sender": "a@b.com", "date": "1"},
@@ -108,9 +107,9 @@ def test_fetch_and_detect_not_connected_returns_404(client_with_db, setup_databa
 
 
 @patch("app.api.endpoints.emails.GmailService")
-def test_fetch_and_detect_returns_emails_and_extractions(MockGmail, client_with_db, setup_database, auth_headers):
+def test_fetch_and_detect_returns_emails_and_extractions(mock_gmail, client_with_db, setup_database, auth_headers):
     mock_svc = MagicMock()
-    MockGmail.return_value = mock_svc
+    mock_gmail.return_value = mock_svc
     mock_svc.authenticate_for_user.return_value = True
     mock_svc.fetch_recent_emails_as_inputs.return_value = [
         EmailInput(subject="Meeting", body="Can we meet tomorrow at 3pm?", message_id="m1"),
@@ -141,10 +140,10 @@ def test_fetch_detect_predict_not_connected_returns_404(client_with_db, setup_da
 
 @patch("app.api.endpoints.emails.GmailService")
 def test_fetch_detect_predict_returns_emails_extractions_and_suggested_slots(
-    MockGmail, client_with_db, setup_database, auth_headers
+    mock_gmail, client_with_db, setup_database, auth_headers
 ):
     mock_svc = MagicMock()
-    MockGmail.return_value = mock_svc
+    mock_gmail.return_value = mock_svc
     mock_svc.authenticate_for_user.return_value = True
     mock_svc.fetch_recent_emails_as_inputs.return_value = [
         EmailInput(subject="Meeting", body="Can we meet tomorrow at 3pm?", message_id="m1"),

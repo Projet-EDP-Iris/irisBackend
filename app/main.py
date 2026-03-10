@@ -1,4 +1,5 @@
 import os
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,8 +33,6 @@ app.include_router(prediction.router, prefix="/api/v1")
 app.include_router(emails.router, prefix="/api/v1")
 
 
-
-
 @app.on_event("startup")
 def startup_event():
     """
@@ -49,12 +48,10 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 
 ALLOWED_ORIGINS = [
-    "http://localhost:5173",      
-    "http://localhost:3000",      
-    "http://localhost:8080",      
-    "https://one-page-site-nine.vercel.app",  
-    
-    
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://localhost:8080",
+    "https://one-page-site-nine.vercel.app",
 ]
 
 

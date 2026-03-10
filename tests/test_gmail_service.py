@@ -3,8 +3,6 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from app.schemas.detection import EmailInput
 from app.services.gmail_service import (
     GmailService,
@@ -23,18 +21,18 @@ def test_decode_body_empty():
 
 def test_decode_body_simple():
     raw = "Hello world"
-    encoded = base64.urlsafe_b64encode(raw.encode("utf-8")).decode("ASCII")
+    encoded = base64.urlsafe_b64encode(raw.encode()).decode("ASCII")
     assert _decode_body(encoded) == raw
 
 
 def test_extract_body_from_payload_body_data():
-    encoded = base64.urlsafe_b64encode("Full email body".encode("utf-8")).decode("ASCII")
+    encoded = base64.urlsafe_b64encode("Full email body".encode()).decode("ASCII")
     payload = {"body": {"data": encoded}}
     assert _extract_body_from_payload(payload, "snippet") == "Full email body"
 
 
 def test_extract_body_from_payload_parts_text_plain():
-    encoded = base64.urlsafe_b64encode("Plain text part".encode("utf-8")).decode("ASCII")
+    encoded = base64.urlsafe_b64encode("Plain text part".encode()).decode("ASCII")
     payload = {
         "body": {},
         "parts": [
@@ -45,8 +43,8 @@ def test_extract_body_from_payload_parts_text_plain():
 
 
 def test_extract_body_from_payload_parts_prefers_plain_over_html():
-    plain_enc = base64.urlsafe_b64encode("Plain".encode("utf-8")).decode("ASCII")
-    html_enc = base64.urlsafe_b64encode("HTML".encode("utf-8")).decode("ASCII")
+    plain_enc = base64.urlsafe_b64encode("Plain".encode()).decode("ASCII")
+    html_enc = base64.urlsafe_b64encode("HTML".encode()).decode("ASCII")
     payload = {
         "parts": [
             {"mimeType": "text/html", "body": {"data": html_enc}},
@@ -69,7 +67,7 @@ def test_get_token_path_for_user():
 
 @patch("app.services.gmail_service.build")
 def test_fetch_recent_emails_returns_body_and_message_id(mock_build):
-    encoded = base64.urlsafe_b64encode("Email body here".encode("utf-8")).decode("ASCII")
+    encoded = base64.urlsafe_b64encode("Email body here".encode()).decode("ASCII")
     mock_get = MagicMock()
     mock_get.execute.return_value = {
         "id": "msg_123",
@@ -105,7 +103,7 @@ def test_fetch_recent_emails_returns_body_and_message_id(mock_build):
 
 @patch("app.services.gmail_service.build")
 def test_fetch_recent_emails_multipart_body(mock_build):
-    encoded = base64.urlsafe_b64encode("Multipart body".encode("utf-8")).decode("ASCII")
+    encoded = base64.urlsafe_b64encode("Multipart body".encode()).decode("ASCII")
     mock_get = MagicMock()
     mock_get.execute.return_value = {
         "id": "msg_456",
@@ -185,7 +183,7 @@ def test_authenticate_for_user_returns_true_when_token_exists(tmp_path):
             mock_cred_instance.expired = False
             mock_cred_instance.refresh_token = None
             mock_creds.from_authorized_user_file.return_value = mock_cred_instance
-            with patch("app.services.gmail_service.build") as mock_build:
+            with patch("app.services.gmail_service.build") as _mock_build:
                 svc = GmailService()
                 result = svc.authenticate_for_user(1)
     assert result is True

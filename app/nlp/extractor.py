@@ -1,8 +1,8 @@
 import re
 from datetime import datetime
+
 from app.schemas.detection import (
     Classification,
-    Constraint,
     EmailInput,
     ExtractionResult,
     Participant,

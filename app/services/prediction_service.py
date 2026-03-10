@@ -1,5 +1,3 @@
-from datetime import datetime
-
 import pendulum
 
 from app.schemas.detection import ExtractionResult, TimeWindow

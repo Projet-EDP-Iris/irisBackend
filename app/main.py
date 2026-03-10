@@ -1,9 +1,9 @@
 import os
 
-import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+import uvicorn
 
 from app.api.endpoints import emails, prediction
 from app.api.routes import detection, users

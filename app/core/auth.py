@@ -7,17 +7,24 @@ from app.core.security import decode_access_token
 from app.db.database import get_db
 from app.models.user import User
 
-security = HTTPBearer()
+security = HTTPBearer(auto_error=False)
+
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: Session = Depends(get_db)
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+    db: Session = Depends(get_db),
 ) -> User:
     """
     Dependency to get the current authenticated user from bearer token.
     Validates JWT token and returns the User object.
     Raises 401 if token is invalid or user not found.
     """
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     token = credentials.credentials
 
     # Decode the JWT token

@@ -5,12 +5,12 @@ from unittest.mock import MagicMock, patch
 
 from app.schemas.detection import EmailInput
 from app.services.gmail_service import (
+    TOKENS_DIR,
     GmailService,
     _decode_body,
     _extract_body_from_payload,
     fetch_recent_emails_as_inputs_for_user,
     get_token_path_for_user,
-    TOKENS_DIR,
 )
 
 

@@ -21,7 +21,8 @@ dependencies = [
     "argon2-cffi (>=21.3.0)",
     "python-jose[cryptography] (>=3.5.0,<4.0.0)",
     "dateparser (>=1.2.0,<2.0.0)",
-    "openai (>=1.0.0,<2.0.0)"
+    "openai (>=1.0.0,<2.0.0)",
+    "pendulum (>=3.0.0,<4.0.0)"
 ]
 
 

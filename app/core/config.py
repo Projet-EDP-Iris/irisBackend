@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = Field(default=None, env="OPENAI_API_KEY")
     LLM_CONFIDENCE_THRESHOLD: float = Field(default=0.6, env="LLM_CONFIDENCE_THRESHOLD")
 
+    # Gmail OAuth (optional; for OAuth callback flow)
+    GOOGLE_CLIENT_ID: str | None = Field(default=None, env="GOOGLE_CLIENT_ID")
+    GOOGLE_CLIENT_SECRET: str | None = Field(default=None, env="GOOGLE_CLIENT_SECRET")
+    GMAIL_REDIRECT_URI: str | None = Field(default=None, env="GMAIL_REDIRECT_URI")
+    GMAIL_CREDENTIALS_PATH: str = Field(default="credentials.json", env="GMAIL_CREDENTIALS_PATH")
+
     class Config:
         # Only load .env if DATABASE_URL is not already set in environment
         # This prevents local .env from overriding Render's environment variables

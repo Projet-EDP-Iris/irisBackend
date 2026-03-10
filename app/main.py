@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api.endpoints import prediction 
+from app.api.endpoints import emails, prediction
 from app.api.routes import detection, users
 from app.core.config import settings
 from app.db.database import init_db
@@ -18,6 +18,7 @@ app = FastAPI(
 
 
 app.include_router(prediction.router, prefix="/api/v1")
+app.include_router(emails.router, prefix="/api/v1")
 
 
 

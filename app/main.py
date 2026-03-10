@@ -1,15 +1,14 @@
 import os
 
+import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import uvicorn
 
 from app.api.endpoints import emails, prediction
 from app.api.routes import detection, users
 from app.core.config import settings
 from app.db.database import init_db
-
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

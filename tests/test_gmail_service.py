@@ -21,18 +21,18 @@ def test_decode_body_empty():
 
 def test_decode_body_simple():
     raw = "Hello world"
-    encoded = base64.urlsafe_b64encode(raw.encode()).decode("ASCII")
+    encoded = base64.urlsafe_b64encode(b"Hello world").decode("ascii")
     assert _decode_body(encoded) == raw
 
 
 def test_extract_body_from_payload_body_data():
-    encoded = base64.urlsafe_b64encode("Full email body".encode()).decode("ASCII")
+    encoded = base64.urlsafe_b64encode(b"Full email body").decode("ascii")
     payload = {"body": {"data": encoded}}
     assert _extract_body_from_payload(payload, "snippet") == "Full email body"
 
 
 def test_extract_body_from_payload_parts_text_plain():
-    encoded = base64.urlsafe_b64encode("Plain text part".encode()).decode("ASCII")
+    encoded = base64.urlsafe_b64encode(b"Plain text part").decode("ascii")
     payload = {
         "body": {},
         "parts": [
@@ -43,8 +43,8 @@ def test_extract_body_from_payload_parts_text_plain():
 
 
 def test_extract_body_from_payload_parts_prefers_plain_over_html():
-    plain_enc = base64.urlsafe_b64encode("Plain".encode()).decode("ASCII")
-    html_enc = base64.urlsafe_b64encode("HTML".encode()).decode("ASCII")
+    plain_enc = base64.urlsafe_b64encode(b"Plain").decode("ascii")
+    html_enc = base64.urlsafe_b64encode(b"HTML").decode("ascii")
     payload = {
         "parts": [
             {"mimeType": "text/html", "body": {"data": html_enc}},
@@ -67,7 +67,7 @@ def test_get_token_path_for_user():
 
 @patch("app.services.gmail_service.build")
 def test_fetch_recent_emails_returns_body_and_message_id(mock_build):
-    encoded = base64.urlsafe_b64encode("Email body here".encode()).decode("ASCII")
+    encoded = base64.urlsafe_b64encode(b"Email body here").decode("ascii")
     mock_get = MagicMock()
     mock_get.execute.return_value = {
         "id": "msg_123",
@@ -103,7 +103,7 @@ def test_fetch_recent_emails_returns_body_and_message_id(mock_build):
 
 @patch("app.services.gmail_service.build")
 def test_fetch_recent_emails_multipart_body(mock_build):
-    encoded = base64.urlsafe_b64encode("Multipart body".encode()).decode("ASCII")
+    encoded = base64.urlsafe_b64encode(b"Multipart body").decode("ascii")
     mock_get = MagicMock()
     mock_get.execute.return_value = {
         "id": "msg_456",

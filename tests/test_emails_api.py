@@ -69,7 +69,7 @@ def auth_headers(client_with_db, setup_database):
 
 def test_get_emails_unauthorized(client_with_db, setup_database):
     r = client_with_db.get("/api/v1/emails")
-    assert r.status_code == 401
+    assert r.status_code == 403
 
 
 def test_get_emails_not_connected_returns_404(client_with_db, setup_database, auth_headers):
@@ -98,7 +98,7 @@ def test_get_emails_returns_list_with_subject_body_message_id(mock_gmail, client
 
 def test_fetch_and_detect_unauthorized(client_with_db, setup_database):
     r = client_with_db.post("/api/v1/emails/fetch-and-detect")
-    assert r.status_code == 401
+    assert r.status_code == 403
 
 
 def test_fetch_and_detect_not_connected_returns_404(client_with_db, setup_database, auth_headers):
@@ -130,7 +130,7 @@ def test_fetch_and_detect_returns_emails_and_extractions(mock_gmail, client_with
 
 def test_fetch_detect_predict_unauthorized(client_with_db, setup_database):
     r = client_with_db.post("/api/v1/emails/fetch-detect-predict")
-    assert r.status_code == 401
+    assert r.status_code == 403
 
 
 def test_fetch_detect_predict_not_connected_returns_404(client_with_db, setup_database, auth_headers):

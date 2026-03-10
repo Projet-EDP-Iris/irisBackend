@@ -110,7 +110,7 @@ The backend wires three steps: **Gmail** (fetch emails), **detection** (extract 
 
 Detection returns `ExtractionResult` (classification, proposed_times, duration_minutes, timezone, participants, etc.). Prediction accepts that same shape; no contract change needed.
 
-For full **Detection API** details (schemas, all endpoints, tests), see [DETECTION_API_PR_SUMMARY.md](DETECTION_API_PR_SUMMARY.md). Detection endpoints are JWT-protected: POST `/detect`, `/detect/thread`, `/validate`, `/feedback`; they consume `EmailInput` and return `ExtractionResult` (or validation/feedback results).
+For detection endpoints and schemas, see `app/api/routes/detection.py` and `app/schemas/detection.py`. Detection endpoints are JWT-protected: POST `/detect`, `/detect/thread`, `/validate`, `/feedback`; they consume `EmailInput` and return `ExtractionResult` (or validation/feedback results).
 
 ---
 

@@ -135,12 +135,13 @@ class GmailService:
         email = user_info.get("email")
         if not email:
             raise Exception("Could not retrieve email address from user info.")
-        token_path = os.path.join(TOKENS_DIR, f"gmail_{email}.json")
+        email_str = str(email)
+        token_path = os.path.join(TOKENS_DIR, f"gmail_{email_str}.json")
         with open(token_path, "w") as token:
             token.write(self.creds.to_json())
         self.service = build("gmail", "v1", credentials=self.creds)
-        self.current_email = email
-        return email
+        self.current_email = email_str
+        return email_str
 
     def save_token_for_user(self, user_id: int, creds: Credentials, gmail_email: str | None = None) -> None:
         """Save token and optional gmail_email for an app user (e.g. from OAuth callback)."""

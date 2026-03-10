@@ -37,9 +37,11 @@ def _parse_window_start(tw: TimeWindow, tz: str) -> pendulum.DateTime | None:
         return None
     try:
         dt = pendulum.parse(tw.start, tz=tz)
-        return dt if isinstance(dt, pendulum.DateTime) else pendulum.datetime(
-            dt.year, dt.month, dt.day, dt.hour, dt.minute, tz=tz
-        )
+        if isinstance(dt, pendulum.DateTime):
+            return dt
+        if isinstance(dt, pendulum.Date) and not isinstance(dt, pendulum.DateTime):
+            return pendulum.datetime(dt.year, dt.month, dt.day, 0, 0, tz=tz)
+        return None
     except Exception:
         return None
 
@@ -119,7 +121,13 @@ def _slot_overlaps_busy(
         busy_end = tw.end
         if busy_end:
             try:
-                busy_end_dt = pendulum.parse(busy_end, tz=tz)
+                parsed = pendulum.parse(busy_end, tz=tz)
+                if isinstance(parsed, pendulum.DateTime):
+                    busy_end_dt: pendulum.DateTime = parsed
+                elif isinstance(parsed, pendulum.Date) and not isinstance(parsed, pendulum.DateTime):
+                    busy_end_dt = pendulum.datetime(parsed.year, parsed.month, parsed.day, 0, 0, tz=tz)
+                else:
+                    busy_end_dt = busy_start.add(hours=1)
             except Exception:
                 busy_end_dt = busy_start.add(hours=1)
         else:

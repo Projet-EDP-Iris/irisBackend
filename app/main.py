@@ -38,8 +38,7 @@ def startup_event():
     """
     init_db()
 
-app.include_router(users.router, prefix="/users", tags=["users"])
-app.include_router(prediction.router, prefix="/api/v1", tags=["prediction"])
+app.include_router(users.router)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

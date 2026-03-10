@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 
 from app.schemas.detection import ExtractionResult
+from app.schemas.prediction import PredictionStatus, RecommendedSlot
 
 
 class EmailItem(BaseModel):
@@ -15,3 +16,11 @@ class EmailItem(BaseModel):
 class FetchAndDetectResponse(BaseModel):
     emails: list[EmailItem]
     extractions: list[ExtractionResult]
+
+
+class FetchDetectPredictResponse(BaseModel):
+    """Response for POST /api/v1/emails/fetch-detect-predict (Gmail to detection to prediction)."""
+    emails: list[EmailItem]
+    extractions: list[ExtractionResult]
+    suggested_slots: list[RecommendedSlot]
+    status: PredictionStatus

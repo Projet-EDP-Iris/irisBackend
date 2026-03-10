@@ -52,6 +52,7 @@ All detection endpoints require JWT: `Authorization: Bearer <access_token>` (obt
 
 ## Notes
 
+- The extraction output (`ExtractionResult`) is consumed by the prediction API (`POST /api/v1/predict/slots/from-detection`) and by the combined pipeline endpoint `POST /api/v1/emails/fetch-detect-predict` (Gmail → detection → prediction).
 - If `OPENAI_API_KEY` is unset, the app uses spaCy-only extraction (no crash, no warning).
 - No raw email content or API keys are logged.
 - OpenAI usage in tests is disabled via `OPENAI_API_KEY` in integration tests and mocked in LLM fallback unit tests.

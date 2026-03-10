@@ -85,6 +85,33 @@ poetry run pytest tests/test_user_api.py -v
 
 **Coverage report:** After running with `--cov-report=html`, open `htmlcov/index.html` in your browser to see which code is tested.
 
+You can also run pipeline and email tests: `poetry run pytest tests/test_emails_api.py tests/test_gmail_service.py -v`
+
+---
+
+## Pipeline: Gmail to detection to prediction
+
+The backend wires three steps: **Gmail** (fetch emails), **detection** (extract intent, times, participants, etc.), and **prediction** (suggest meeting slots). Contracts are aligned: detection returns `ExtractionResult`(s); prediction accepts `ExtractionResult` (or a list and uses the first).
+
+### One-shot: fetch, detect, and predict in one call
+
+**POST /api/v1/emails/fetch-detect-predict** (JWT required)
+
+- Fetches recent Gmail emails for the authenticated user, runs detection on each, then runs prediction on the first extraction and returns a combined result. Returns 404 if Gmail is not connected for this user.
+- **Query:** `max_results` (default 10).
+- **Body (optional):** `{ "preferences": { "working_hours": {...}, "preferred_duration_minutes": 30, "timezone": "Europe/Paris" }, "calendar": { "busy_slots": [...], "free_slots": [...] } }` for the prediction step.
+- **Response:** `{ "emails": [...], "extractions": [...], "suggested_slots": [...], "status": "READY_TO_SCHEDULE" }`
+
+### Step-by-step (call A then B then C)
+
+1. **GET /api/v1/emails?max_results=10** (JWT) — Returns list of emails (subject, body, message_id, sender, date). 404 if Gmail not connected.
+2. **POST /api/v1/emails/fetch-and-detect** (JWT) — Fetches and runs detection; returns `{ "emails": [...], "extractions": [...] }`. Or use **POST /detect** with body `{ "emails": [ { "subject", "body", "message_id" }, ... ] }` if you already have the emails.
+3. **POST /api/v1/predict/slots/from-detection** — Body: `{ "extraction": <ExtractionResult or list>, "preferences": {...}, "calendar": {...} }`. Returns `{ "suggested_slots": [...], "status": "READY_TO_SCHEDULE" }`.
+
+Detection returns `ExtractionResult` (classification, proposed_times, duration_minutes, timezone, participants, etc.). Prediction accepts that same shape; no contract change needed.
+
+For full **Detection API** details (schemas, all endpoints, tests), see [DETECTION_API_PR_SUMMARY.md](DETECTION_API_PR_SUMMARY.md). Detection endpoints are JWT-protected: POST `/detect`, `/detect/thread`, `/validate`, `/feedback`; they consume `EmailInput` and return `ExtractionResult` (or validation/feedback results).
+
 ---
 
 ## Docker Commands
@@ -171,32 +198,40 @@ docker-compose exec postgres psql -U iris_user -d iris_db
 ```
 irisBackend/
 ├── app/
-│   ├── api/              # API endpoints and routes
-│   │   └── routes/       # Route handlers (users, events, etc.)
-│   ├── core/             # Core application config
-│   │   ├── auth.py       # Authentication logic
-│   │   ├── config.py     # Settings and environment variables
-│   │   └── security.py   # Password hashing, JWT tokens
+│   ├── api/
+│   │   ├── endpoints/    # /api/v1 routes (prediction, emails)
+│   │   │   ├── prediction.py
+│   │   │   └── emails.py
+│   │   └── routes/       # Route handlers (users, detection)
+│   │       ├── users.py
+│   │       └── detection.py
+│   ├── core/             # Config, auth, security
+│   │   ├── auth.py
+│   │   ├── config.py
+│   │   └── security.py
 │   ├── db/               # Database connection and session
-│   ├── models/           # SQLAlchemy database models
-│   │   ├── base.py       # Base model and mixins
-│   │   └── user.py       # User model
-│   ├── schemas/          # Pydantic request/response schemas
-│   ├── nlp/              # NLP processing (SpaCy, NLTK)
+│   ├── models/           # SQLAlchemy models (user, feedback, etc.)
+│   ├── schemas/          # Pydantic schemas (detection, prediction, email, user)
+│   ├── services/         # Business logic
+│   │   ├── detection.py
+│   │   ├── prediction_service.py
+│   │   └── gmail_service.py
+│   ├── nlp/              # NLP (SpaCy, extractor, LLM fallback)
 │   └── main.py           # FastAPI app entry point
 ├── tests/                # Automated tests
-├── .github/
-│   └── workflows/        # CI/CD automation (tests, linting, security)
-├── docker-compose.yml    # PostgreSQL database configuration
+├── .github/workflows/    # CI/CD (tests, linting, coverage, security)
+├── docker-compose.yml    # PostgreSQL
 └── pyproject.toml        # Dependencies and project metadata
 ```
 
 **Key Components:**
-- **models/** - Database tables (what data we store)
-- **schemas/** - API request/response formats (how data moves in/out)
-- **api/routes/** - Endpoint logic (what happens when you call `/users`)
+- **api/endpoints/** - `/api/v1` routes: prediction (slot suggestions from extraction), emails (Gmail fetch, fetch-and-detect, fetch-detect-predict)
+- **api/routes/** - Users (auth, CRUD) and detection (extract intent/times from emails; JWT-protected)
+- **services/** - Detection (NLP + optional LLM), prediction (slot scoring), Gmail (token by user_id, full body, message_id)
+- **schemas/** - Request/response contracts (detection, prediction, email)
+- **models/** - Database tables (users, detection feedback)
 - **core/** - Security, config, authentication
-- **tests/** - Automated verification that everything works
+- **tests/** - Automated verification
 
 ---
 

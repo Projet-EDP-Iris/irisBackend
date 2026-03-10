@@ -127,3 +127,37 @@ def test_fetch_and_detect_returns_emails_and_extractions(MockGmail, client_with_
     ext = data["extractions"][0]
     assert "classification" in ext
     assert ext["classification"] == "meeting_schedule"
+
+
+def test_fetch_detect_predict_unauthorized(client_with_db, setup_database):
+    r = client_with_db.post("/api/v1/emails/fetch-detect-predict")
+    assert r.status_code == 401
+
+
+def test_fetch_detect_predict_not_connected_returns_404(client_with_db, setup_database, auth_headers):
+    r = client_with_db.post("/api/v1/emails/fetch-detect-predict", headers=auth_headers)
+    assert r.status_code == 404
+
+
+@patch("app.api.endpoints.emails.GmailService")
+def test_fetch_detect_predict_returns_emails_extractions_and_suggested_slots(
+    MockGmail, client_with_db, setup_database, auth_headers
+):
+    mock_svc = MagicMock()
+    MockGmail.return_value = mock_svc
+    mock_svc.authenticate_for_user.return_value = True
+    mock_svc.fetch_recent_emails_as_inputs.return_value = [
+        EmailInput(subject="Meeting", body="Can we meet tomorrow at 3pm?", message_id="m1"),
+    ]
+    r = client_with_db.post("/api/v1/emails/fetch-detect-predict", headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert "emails" in data
+    assert "extractions" in data
+    assert "suggested_slots" in data
+    assert "status" in data
+    assert data["status"] == "READY_TO_SCHEDULE"
+    assert len(data["emails"]) == 1
+    assert len(data["extractions"]) == 1
+    assert isinstance(data["suggested_slots"], list)
+    assert data["extractions"][0]["classification"] == "meeting_schedule"

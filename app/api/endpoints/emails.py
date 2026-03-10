@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
+from pydantic import BaseModel
 
 from app.core.auth import get_current_active_user
 from app.models.user import User
-from app.schemas.email import EmailItem, FetchAndDetectResponse
+from app.schemas.detection import ExtractionResult
+from app.schemas.email import EmailItem, FetchAndDetectResponse, FetchDetectPredictResponse
+from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
 from app.services.detection import detect_batch
 from app.services.gmail_service import GmailService
+from app.services.prediction_service import get_suggested_slots
 
 router = APIRouter(tags=["emails"])
 
@@ -61,3 +65,40 @@ def post_fetch_and_detect(
         for e in emails
     ]
     return FetchAndDetectResponse(emails=email_items, extractions=extractions)
+
+
+class FetchDetectPredictBody(BaseModel):
+    """Optional body for fetch-detect-predict (preferences and calendar for prediction step)."""
+    preferences: UserPreferences | None = None
+    calendar: CalendarAvailability | None = None
+
+
+@router.post("/emails/fetch-detect-predict", response_model=FetchDetectPredictResponse)
+def post_fetch_detect_predict(
+    max_results: int = 10,
+    body: FetchDetectPredictBody | None = Body(None),
+    current_user: User = Depends(get_current_active_user),
+) -> FetchDetectPredictResponse:
+    """Fetch Gmail emails, run detection, then prediction. Returns 404 if Gmail is not connected."""
+    svc = GmailService()
+    if not svc.authenticate_for_user(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Gmail not connected for this user",
+        )
+    emails = svc.fetch_recent_emails_as_inputs(n=max_results)
+    extractions = detect_batch(emails)
+    extraction = extractions[0] if extractions else ExtractionResult()
+    prefs = body.preferences if body else None
+    cal = body.calendar if body else None
+    suggested_slots = get_suggested_slots(extraction, preferences=prefs, calendar=cal)
+    email_items = [
+        EmailItem(subject=e.subject, body=e.body, message_id=e.message_id)
+        for e in emails
+    ]
+    return FetchDetectPredictResponse(
+        emails=email_items,
+        extractions=extractions,
+        suggested_slots=suggested_slots,
+        status=PredictionStatus.READY_TO_SCHEDULE,
+    )

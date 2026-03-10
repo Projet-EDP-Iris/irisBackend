@@ -138,6 +138,8 @@ docker-compose exec postgres psql -U iris_user -d iris_db
 
 ## Contributing Workflow
 
+We use **develop** as the integration branch. Feature branches merge into **develop**; when develop is stable, open a PR from **develop** to **main**. CI runs on pull requests to **develop** and **main** (tests, coverage, lint).
+
 ### Creating a Pull Request
 
 1. **Create a feature branch:**
@@ -159,24 +161,23 @@ docker-compose exec postgres psql -U iris_user -d iris_db
 4. **Create Pull Request on GitHub:**
    - Go to the repository on GitHub
    - Click "Pull requests" → "New pull request"
-   - Select your branch
-   - Fill in the PR template
-   - Click "Create pull request"
+   - **Target branch:** **develop** (for feature branches) or **main** (for the release PR from develop)
+   - Select your branch, fill in the PR template, and click "Create pull request"
 
 5. **Wait for CI/CD checks:**
-   - Tests must pass ✅
-   - Code coverage must meet threshold ✅
-   - Linting must pass ✅
+   - Tests must pass
+   - Code coverage must meet threshold (60%)
+   - Linting must pass
 
-6. **Keep your branch up-to-date with main:**
+6. **Keep your branch up-to-date with develop:**
    ```bash
-   # Fetch latest changes from main
-   git checkout main
-   git pull origin main
+   # Fetch latest changes from develop
+   git checkout develop
+   git pull origin develop
 
    # Switch back to your branch and merge
    git checkout feature/your-feature-name
-   git merge main
+   git merge develop
 
    # Resolve any conflicts if needed
    # Then push updated branch
@@ -187,7 +188,7 @@ docker-compose exec postgres psql -U iris_user -d iris_db
 
 8. **Merge** after approval (GitHub will check that your branch is up-to-date)
 
-**Important:** Your branch **must be up-to-date with main** before merging. If main has new commits after you created your PR, update your branch using the steps in #6.
+**Important:** Your feature branch **must be up-to-date with develop** before merging into develop. For the release PR (develop → main), develop must be up-to-date with main if you've changed the default branch. Update your branch using the steps in #6 when needed.
 
 ---
 

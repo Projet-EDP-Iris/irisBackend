@@ -8,7 +8,7 @@ from app.schemas.prediction import (
 )
 from app.services.prediction_service import get_suggested_slots
 
-router = APIRouter()
+router = APIRouter(tags=["prediction"])
 
 
 def _resolve_extraction(body: PredictSlotsFromDetectionRequest) -> ExtractionResult:
@@ -20,6 +20,7 @@ def _resolve_extraction(body: PredictSlotsFromDetectionRequest) -> ExtractionRes
 
 @router.post("/predict/slots/from-detection", response_model=PredictionResponse)
 async def predict_from_detection(body: PredictSlotsFromDetectionRequest) -> PredictionResponse:
+    """Take detection output (and optional preferences/calendar) and return suggested meeting slots."""
     extraction = _resolve_extraction(body)
     suggestions = get_suggested_slots(
         extraction,

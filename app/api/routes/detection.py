@@ -29,6 +29,7 @@ def post_detect(
     body: EmailBatchInput,
     current_user: User = Depends(get_current_active_user),
 ) -> DetectResponse:
+    """Run detection on a batch of emails (subject, body, optional message_id). Returns one extraction per email."""
     results = detect_batch(body.emails)
     return DetectResponse(results=results)
 
@@ -38,6 +39,7 @@ def post_detect_thread(
     body: ThreadInput,
     current_user: User = Depends(get_current_active_user),
 ) -> ThreadExtractionResult:
+    """Run detection on a thread of messages. Returns merged extraction plus per-message results."""
     return detect_thread(body.messages)
 
 
@@ -46,6 +48,7 @@ def post_validate(
     body: ValidationInput,
     current_user: User = Depends(get_current_active_user),
 ) -> ValidationResult:
+    """Validate an extraction and return missing fields and clarifying questions."""
     return validate_extraction(body.extraction)
 
 
@@ -55,4 +58,5 @@ def post_feedback(
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> FeedbackResult:
+    """Save user corrections to an extraction for a given message_id."""
     return save_feedback(body, db, user_id=current_user.id)

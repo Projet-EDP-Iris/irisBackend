@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.nlp.llm_fallback_openai import LLMFallbackOpenAI, _merge_patch
-from app.schemas.detection import EmailInput, ExtractionResult, TimeWindow
+from app.schemas.detection import EmailInput, ExtractionResult
 
 
 @pytest.fixture

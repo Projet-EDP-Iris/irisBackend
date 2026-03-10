@@ -2,9 +2,9 @@ name: Code Coverage
 
 on:
   pull_request:
-    branches: [main]
+    branches: [develop, main]
   push:
-    branches: [main]
+    branches: [develop, main]
 
 concurrency:
   group: coverage-${{ github.ref }}
@@ -36,7 +36,7 @@ jobs:
         run: |
           poetry run python - <<'PY'
           from app.db.database import engine
-          from app.models import Base, User
+          from app.models import Base, User, DetectionFeedback  # ensure all models registered
           Base.metadata.create_all(bind=engine)
           PY
 
@@ -49,10 +49,11 @@ jobs:
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           file: ./coverage.xml
           flags: unittests
           name: codecov-umbrella
-          fail_ci_if_error: false
+          fail_ci_if_error: true
 
       - name: Upload HTML coverage report
         if: always()
@@ -62,5 +63,4 @@ jobs:
           path: htmlcov/
 
       - name: Check coverage threshold
-        run: |
-          poetry run pytest --cov=app --cov-fail-under=60 || echo "Warning: Coverage below 60%"
+        run: poetry run pytest --cov=app --cov-fail-under=60

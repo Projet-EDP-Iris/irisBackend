@@ -3,7 +3,6 @@
 .env.*
 .venv/
 venv/
-poetry.lock
 .python-version
 credentials.json
 tokens/

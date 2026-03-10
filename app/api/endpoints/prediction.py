@@ -7,7 +7,8 @@ router = APIRouter()
 @router.post("/predict/slots/from-detection")
 async def predict_from_detection(detection_result: dict):
     
-    result = detection_result.get("results", [{}])[0]
+    results = detection_result.get("results", [{}])
+    result = results[0] if results else {}
     duration = result.get("duration_minutes", 30)
     intent = result.get("classification", "meeting")
     

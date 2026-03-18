@@ -51,6 +51,7 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://localhost:8080",
     "https://one-page-site-nine.vercel.app",
+    "null",  # Packaged Electron .exe loads from file://, which sends Origin: null
 ]
 
 

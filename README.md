@@ -16,40 +16,69 @@ Backend API for the Iris application, built with **FastAPI** and **Python 3.12**
 
 ## Quick Start
 
-### 1. Clone and Install
+Follow these steps **in order** every time you want to run the backend locally.
+
+---
+
+### Step 1 — Install dependencies (first time only)
 
 ```bash
-# Clone repository
-git clone <repository-url>
-cd irisBackend
-
-# Install dependencies
 poetry install
 ```
 
-### 2. Set Up Database
+Only needed once when you first clone the repo, or after pulling changes that added new packages.
+
+---
+
+### Step 2 — Start Docker Desktop
+
+Open the **Docker Desktop** app on your Mac and wait until it says **"Engine running"** in the bottom left. Nothing will work without this.
+
+---
+
+### Step 3 — Start the database
 
 ```bash
-# Start PostgreSQL in Docker
 docker-compose up -d
+```
 
-# Verify it's running
+This starts the local PostgreSQL database in the background. To confirm it's running:
+
+```bash
 docker-compose ps
-# Should show iris_postgres as "Up"
+# You should see iris_postgres with status "Up"
 ```
 
-### 3. Configure Environment
+> You need to do this every time you restart your computer or after Docker Desktop was closed.
+
+---
+
+### Step 4 — Start the backend
 
 ```bash
-# Copy environment template
-cp .env.example .env
-# Defaults work for local development
+poetry run uvicorn app.main:app --reload --port 8000
 ```
 
-### 4. Run the Application
+You should see:
+```
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Application startup complete.
+```
+
+The API is now live at **http://localhost:8000**
+Interactive docs at **http://localhost:8000/docs**
+
+Press `CTRL+C` to stop the server.
+
+---
+
+### Stopping everything
 
 ```bash
-poetry run uvicorn app.main:app --reload
+# Stop the backend: CTRL+C in the terminal
+
+# Stop the database
+docker-compose down
 ```
 
 ### 5. Test the API

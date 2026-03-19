@@ -42,12 +42,14 @@ Open the **Docker Desktop** app on your Mac and wait until it says **"Engine run
 docker-compose up -d
 ```
 
-This starts the local PostgreSQL database in the background. To confirm it's running:
+This starts the local PostgreSQL database in the background. **Wait 5–10 seconds** for PostgreSQL to finish initializing before moving to Step 4. To confirm it's ready:
 
 ```bash
 docker-compose ps
-# You should see iris_postgres with status "Up"
+# You should see iris_postgres with status "Up (healthy)"
 ```
+
+> If it shows "Up" but not "healthy" yet, wait a few more seconds and run `docker-compose ps` again.
 
 > You need to do this every time you restart your computer or after Docker Desktop was closed.
 

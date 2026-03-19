@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from app.api.routes import users
+from app.api.endpoints import emails, auth_google
 from app.core.config import settings
 from app.db.database import init_db
 
@@ -25,7 +26,9 @@ def startup_event():
     """
     init_db()
 
-app.include_router(users.router)
+app.include_router(users.router, prefix=settings.API_V1_STR)
+app.include_router(emails.router, prefix=settings.API_V1_STR)
+app.include_router(auth_google.router, prefix=settings.API_V1_STR)
 
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

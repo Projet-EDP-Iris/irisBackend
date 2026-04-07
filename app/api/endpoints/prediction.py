@@ -1,4 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException # On ajoute Depends et HTTPException
+from sqlalchemy.orm import Session
+from app.db.database import get_db  # On importe le tuyau de Danlyn
+from app.models.email import Email  # On importe le modèle pour parler à la table
 
 from app.schemas.detection import ExtractionResult
 from app.schemas.prediction import (
@@ -18,16 +21,30 @@ def _resolve_extraction(body: PredictSlotsFromDetectionRequest) -> ExtractionRes
     return raw
 
 
-@router.post("/predict/slots/from-detection", response_model=PredictionResponse)
-async def predict_from_detection(body: PredictSlotsFromDetectionRequest) -> PredictionResponse:
-    """Take detection output (and optional preferences/calendar) and return suggested meeting slots."""
-    extraction = _resolve_extraction(body)
+@router.post("/predict/slots/{email_id}", response_model=PredictionResponse)
+async def predict_from_detection(
+    email_id: int,
+    body: PredictSlotsFromDetectionRequest,
+    db: Session = Depends(get_db)
+) -> PredictionResponse:
+    """Take detection output and return suggested meeting slots + summary."""
+    email_record = db.query(Email).filter(Email.id == email_id).first()
+    if not email_record:
+        raise HTTPException(status_code=404, detail="Email non trouvé en base")
+    extraction = email_record.extraction_data
+    
     suggestions = get_suggested_slots(
         extraction,
         preferences=body.preferences,
         calendar=body.calendar,
     )
+    email_record.predicted_slots = [s.dict() for s in suggestions]
+    db.commit()
+    db.refresh(email_record)
+    mail_summary = getattr(extraction, "summary", "Résumé non disponible")
+
     return PredictionResponse(
         suggested_slots=suggestions,
         status=PredictionStatus.READY_TO_SCHEDULE,
+        summary=email_record.summary or "Résumé en cours de génération........"
     )

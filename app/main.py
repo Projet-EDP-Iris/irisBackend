@@ -9,7 +9,6 @@ from app.api.endpoints.emails import router as email_router
 from app.api.endpoints.prediction import router as prediction_router
 from app.api.endpoints.suggestion import router as suggestion_router
 from app.api.routes import router as user_router
-from app.api.routes import router as detection_router 
 from app.core.config import settings
 from app.db.database import init_db, engine
 from app.models import Base
@@ -52,7 +51,6 @@ def startup_event():
 # 5. Inclusion des Routes (Une seule fois par router !)
 # Routes avec préfixes v1
 app.include_router(user_router, prefix="/api/v1/user", tags=["users"])
-app.include_router(detection_router, prefix="/api/v1/detection", tags=["detection"])
 app.include_router(email_router, prefix="/emails", tags=["emails"])
 app.include_router(prediction_router, prefix="/predictions", tags=["predictions"])
 app.include_router(suggestion_router, prefix="/suggestions", tags=["suggestions"])

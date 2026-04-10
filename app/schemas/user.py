@@ -23,6 +23,7 @@ class UserCreate(BaseModel):
 class UserResponse(BaseModel):
     id: int
     email: EmailStr
+    name: str | None = None
     role: str
     has_subscription: bool
     bank_account_id: str | None = None
@@ -37,6 +38,7 @@ class UserResponse(BaseModel):
 class UserUpdate(BaseModel):
     email: EmailStr | None = None
     password: Password | None = None
+    name: str | None = None
     role: str | None = None
     has_subscription: bool | None = None
     bank_account_id: str | None = None

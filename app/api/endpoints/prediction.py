@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException # On ajoute Depends et HTTPException
+from fastapi import APIRouter, Depends, HTTPException 
 from sqlalchemy.orm import Session
-from app.db.database import get_db  # On importe le tuyau de Danlyn
-from app.models.email import Email  # On importe le modèle pour parler à la table
+from app.db.database import get_db  
+from app.models.email import Email  
 
 from app.schemas.detection import ExtractionResult
 from app.schemas.prediction import (

@@ -8,12 +8,12 @@ from fastapi.staticfiles import StaticFiles
 from app.api.endpoints.emails import router as email_router
 from app.api.endpoints.prediction import router as prediction_router
 from app.api.endpoints.suggestion import router as suggestion_router
-from app.api.routes import router as user_router
+from app.api.routes.users import router as user_router
 from app.core.config import settings
 from app.db.database import init_db, engine
 from app.models import Base
 
-# 1. Création des tables (synchrone au chargement du module)
+# 1. Création des tables 
 Base.metadata.create_all(bind=engine)
 
 # 2. Configuration de l'application
@@ -37,7 +37,7 @@ app = FastAPI(
 # 3. Middleware CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # On garde "*" pour tes tests, tu pourras restreindre plus tard
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,15 +48,13 @@ app.add_middleware(
 def startup_event():
     init_db()
 
-# 5. Inclusion des Routes (Une seule fois par router !)
-# Routes avec préfixes v1
+# 5. Inclusion des Routes
 app.include_router(user_router, prefix="/api/v1/user", tags=["users"])
 app.include_router(email_router, prefix="/emails", tags=["emails"])
 app.include_router(prediction_router, prefix="/predictions", tags=["predictions"])
 app.include_router(suggestion_router, prefix="/suggestions", tags=["suggestions"])
 
 # 6. Fichiers statiques
-# Assure-toi que le dossier 'app/static' existe bien
 if os.path.exists("app/static"):
     app.mount("/static", StaticFiles(directory="app/static"), name="static")
 

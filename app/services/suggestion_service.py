@@ -8,7 +8,7 @@ def generate_email_suggestion(email_content: str, slots: list) -> str:
         start = slot.get('start', 'N/A')
         formatted_slots += f"- {start}\n"
 
-    # 2. Simulation de la rédaction (À remplacer par ton appel OpenAI/LLM)
+    # 2. Simulation de la rédaction 
     prompt_simule = (
         f"Bonjour,\n\n"
         f"Merci pour votre message concernant : '{email_content[:50]}...'.\n"

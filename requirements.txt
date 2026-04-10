@@ -7,8 +7,10 @@ pydantic
 pydantic-settings
 pendulum
 python-jose[cryptography]
-passlib[bcrypt]
+passlib[argon2]>=1.7.4
 google-auth
 google-auth-oauthlib
 google-auth-httplib2
 google-api-python-client
+email-validator>=2.0.0
+argon2-cffi>=23.1.0

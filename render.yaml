@@ -2,17 +2,9 @@
 # This file defines all infrastructure needed for the Iris API
 
 services:
-  # PostgreSQL Database Service
-  - type: pserv
-    name: iris-postgres
-    env: docker
-    plan: free  # Change to 'free' for free tier, or 'starter'/'standard' for paid
-    region: oregon  # Choose: oregon, frankfurt, singapore, ohio
-    # Database will be created automatically by Render
-    # Credentials will be auto-generated and available via environment variables
-    ipAllowList: []  # Empty = allow all; add IPs to restrict access
-
   # FastAPI Web Service
+  # Database: Neon (https://neon.tech) — set DATABASE_URL manually in Render dashboard
+  # Local development: Docker Compose (docker-compose.yml) manages PostgreSQL automatically
   - type: web
     name: iris-backend
     env: python
@@ -40,9 +32,7 @@ services:
     # Environment Variables
     envVars:
       - key: DATABASE_URL
-        fromDatabase:
-          name: iris-postgres
-          property: connectionString
+        sync: false  # Set manually in Render dashboard — use Neon connection string
 
       - key: SECRET_KEY
         generateValue: true  # Auto-generate a secure secret key

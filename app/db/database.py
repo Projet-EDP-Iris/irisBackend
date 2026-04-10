@@ -7,14 +7,20 @@ from app.core.config import settings
 # This MUST be done before calling Base.metadata.create_all()
 from app.models import Base, DetectionFeedback, User  # noqa: F401
 
-if settings.DATABASE_URL.startswith("sqlite"):
+_db_url = settings.DATABASE_URL
+# Render (and some other hosts) provide "postgres://" but SQLAlchemy 2.0
+# only accepts "postgresql://".
+if _db_url.startswith("postgres://"):
+    _db_url = _db_url.replace("postgres://", "postgresql://", 1)
+
+if _db_url.startswith("sqlite"):
     engine = create_engine(
-        settings.DATABASE_URL,
+        _db_url,
         connect_args={"check_same_thread": False},
         future=True
     )
 else:
-    engine = create_engine(settings.DATABASE_URL, future=True)
+    engine = create_engine(_db_url, future=True)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 

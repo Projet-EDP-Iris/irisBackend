@@ -42,3 +42,4 @@ class PredictionResponse(BaseModel):
     suggested_slots: list[RecommendedSlot]
     status: PredictionStatus = PredictionStatus.READY_TO_SCHEDULE
     message: str | None = None
+    summary: str | None = None

@@ -7,15 +7,13 @@ No external services involved — pure Python logic.
 import os
 
 import pytest
+from cryptography.fernet import Fernet
 
-# Inject a valid Fernet key before importing the module so it doesn't
-# raise at import time when SECRET_ENCRYPTION_KEY is unset in CI.
-os.environ.setdefault(
-    "SECRET_ENCRYPTION_KEY", "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU="
-)
+# Generate a fresh key per test run — no hardcoded secret in source.
+_TEST_KEY = Fernet.generate_key().decode()
+os.environ.setdefault("SECRET_ENCRYPTION_KEY", _TEST_KEY)
 
 from app.core.encryption import decrypt, encrypt  # noqa: E402
-
 
 # --- Round-trip ---
 
@@ -56,10 +54,11 @@ def test_encrypt_raises_when_key_missing(monkeypatch):
     monkeypatch.delenv("SECRET_ENCRYPTION_KEY", raising=False)
     # Re-import to bypass the module-level cached key
     import importlib
+
     import app.core.encryption as enc_module
     importlib.reload(enc_module)
     with pytest.raises(RuntimeError, match="SECRET_ENCRYPTION_KEY"):
         enc_module.encrypt("anything")
     # Restore so other tests are unaffected
-    os.environ["SECRET_ENCRYPTION_KEY"] = "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU="
+    os.environ["SECRET_ENCRYPTION_KEY"] = _TEST_KEY
     importlib.reload(enc_module)

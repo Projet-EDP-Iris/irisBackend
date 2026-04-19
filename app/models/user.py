@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Integer, JSON, String
+from sqlalchemy import JSON, Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TimestampMixin

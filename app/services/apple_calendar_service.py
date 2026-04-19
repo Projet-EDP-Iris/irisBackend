@@ -1,10 +1,9 @@
 import uuid
-from datetime import datetime, timezone as dt_timezone
+from datetime import UTC, datetime
 
 import caldav
 
 from app.core.encryption import decrypt
-
 
 APPLE_CALDAV_URL = "https://caldav.icloud.com"
 
@@ -55,10 +54,10 @@ def create_apple_calendar_event(
     # DTSTART/DTEND must be in compact UTC format: YYYYMMDDTHHMMSSZ
     def _fmt(dt: datetime) -> str:
         if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=dt_timezone.utc)
-        return dt.astimezone(dt_timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            dt = dt.replace(tzinfo=UTC)
+        return dt.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
 
-    dtstamp = _fmt(datetime.now(dt_timezone.utc))
+    dtstamp = _fmt(datetime.now(UTC))
 
     ics = (
         "BEGIN:VCALENDAR\r\n"

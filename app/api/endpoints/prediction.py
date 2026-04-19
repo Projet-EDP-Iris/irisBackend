@@ -1,8 +1,8 @@
-from fastapi import APIRouter, Depends, HTTPException 
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from app.db.database import get_db  
-from app.models.email import Email  
 
+from app.db.database import get_db
+from app.models.email import Email
 from app.schemas.detection import ExtractionResult
 from app.schemas.prediction import (
     PredictionResponse,
@@ -32,7 +32,7 @@ async def predict_from_detection(
     if not email_record:
         raise HTTPException(status_code=404, detail="Email non trouvé en base")
     extraction = email_record.extraction_data
-    
+
     suggestions = get_suggested_slots(
         extraction,
         preferences=body.preferences,
@@ -41,8 +41,6 @@ async def predict_from_detection(
     email_record.predicted_slots = [s.dict() for s in suggestions]
     db.commit()
     db.refresh(email_record)
-    mail_summary = getattr(extraction, "summary", "Résumé non disponible")
-
     return PredictionResponse(
         suggested_slots=suggestions,
         status=PredictionStatus.READY_TO_SCHEDULE,

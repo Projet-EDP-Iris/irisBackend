@@ -24,6 +24,8 @@ app.dependency_overrides[get_db] = override_get_db
 
 client = TestClient(app)
 
+BASE = "/api/v1/user/users"
+
 # Test data
 TEST_USER_EMAIL = "testuser@example.com"
 TEST_USER_PASSWORD = "Secret12!"
@@ -41,7 +43,7 @@ def setup_database():
 def test_create_user_api():
     """Test creating a new user account"""
     response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -60,7 +62,7 @@ def test_create_user_duplicate_email():
     """Test that duplicate email returns 400"""
     # Create first user
     client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -70,7 +72,7 @@ def test_create_user_duplicate_email():
 
     # Try to create duplicate
     response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": "Different1!",
@@ -83,7 +85,7 @@ def test_create_user_duplicate_email():
 def test_create_user_weak_password():
     """Test that weak password returns 422"""
     response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": "weak@example.com",
             "password": "weak",
@@ -96,7 +98,7 @@ def test_login_success():
     """Test successful login returns JWT token"""
     # Create user
     client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -106,7 +108,7 @@ def test_login_success():
 
     # Login
     response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD
@@ -122,7 +124,7 @@ def test_login_wrong_password():
     """Test login with wrong password returns 401"""
     # Create user
     client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -132,7 +134,7 @@ def test_login_wrong_password():
 
     # Try to login with wrong password
     response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_USER_EMAIL,
             "password": "WrongPass1!"
@@ -144,7 +146,7 @@ def test_login_wrong_password():
 def test_login_nonexistent_user():
     """Test login with non-existent user returns 401"""
     response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": "nonexistent@example.com",
             "password": "SomePass1!"
@@ -156,7 +158,7 @@ def test_get_current_user():
     """Test getting current user info with valid token"""
     # Create and login
     client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -165,7 +167,7 @@ def test_get_current_user():
     )
 
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD
@@ -175,7 +177,7 @@ def test_get_current_user():
 
     # Get current user
     response = client.get(
-        "/users/me",
+        f"{BASE}/me",
         headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200
@@ -185,13 +187,13 @@ def test_get_current_user():
 
 def test_get_current_user_no_token():
     """Test getting current user without token returns 403"""
-    response = client.get("/users/me")
+    response = client.get(f"{BASE}/me")
     assert response.status_code == 403
 
 def test_get_current_user_invalid_token():
     """Test getting current user with invalid token returns 401"""
     response = client.get(
-        "/users/me",
+        f"{BASE}/me",
         headers={"Authorization": "Bearer invalid_token_here"}
     )
     assert response.status_code == 401
@@ -200,7 +202,7 @@ def test_get_user_by_id():
     """Test getting a specific user by ID"""
     # Create user
     create_response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -211,7 +213,7 @@ def test_get_user_by_id():
 
     # Login
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD
@@ -221,7 +223,7 @@ def test_get_user_by_id():
 
     # Get user by ID
     response = client.get(
-        f"/users/{user_id}",
+        f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200
@@ -233,7 +235,7 @@ def test_get_user_not_found():
     """Test getting non-existent user returns 404"""
     # Create and login
     client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -242,7 +244,7 @@ def test_get_user_not_found():
     )
 
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD
@@ -252,7 +254,7 @@ def test_get_user_not_found():
 
     # Try to get non-existent user
     response = client.get(
-        "/users/99999",
+        f"{BASE}/99999",
         headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 404
@@ -261,7 +263,7 @@ def test_update_own_user():
     """Test user can update their own information"""
     # Create and login
     create_response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -271,7 +273,7 @@ def test_update_own_user():
     user_id = create_response.json()["id"]
 
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD
@@ -281,7 +283,7 @@ def test_update_own_user():
 
     # Update email
     response = client.patch(
-        f"/users/{user_id}",
+        f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"},
         json={"email": "newemail@example.com"}
     )
@@ -293,7 +295,7 @@ def test_update_user_password():
     """Test user can update their password"""
     # Create and login
     create_response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -303,7 +305,7 @@ def test_update_user_password():
     user_id = create_response.json()["id"]
 
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD
@@ -314,7 +316,7 @@ def test_update_user_password():
     # Update password
     new_password = "NewPass123!"
     response = client.patch(
-        f"/users/{user_id}",
+        f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"},
         json={"password": new_password}
     )
@@ -322,7 +324,7 @@ def test_update_user_password():
 
     # Verify can login with new password
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_USER_EMAIL,
             "password": new_password
@@ -334,7 +336,7 @@ def test_update_other_user_forbidden():
     """Test regular user cannot update another user"""
     # Create two users
     user1_response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": "user1@example.com",
             "password": "Pass1234!",
@@ -344,7 +346,7 @@ def test_update_other_user_forbidden():
     _ = user1_response.json()["id"]  # noqa: F841
 
     user2_response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": "user2@example.com",
             "password": "Pass1234!",
@@ -355,7 +357,7 @@ def test_update_other_user_forbidden():
 
     # Login as user1
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": "user1@example.com",
             "password": "Pass1234!"
@@ -365,7 +367,7 @@ def test_update_other_user_forbidden():
 
     # Try to update user2
     response = client.patch(
-        f"/users/{user2_id}",
+        f"{BASE}/{user2_id}",
         headers={"Authorization": f"Bearer {token}"},
         json={"email": "hacked@example.com"}
     )
@@ -375,7 +377,7 @@ def test_admin_can_update_other_user():
     """Test admin can update other users"""
     # Create regular user
     user_response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -386,7 +388,7 @@ def test_admin_can_update_other_user():
 
     # Create admin
     client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_ADMIN_EMAIL,
             "password": TEST_ADMIN_PASSWORD,
@@ -396,7 +398,7 @@ def test_admin_can_update_other_user():
 
     # Login as admin
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_ADMIN_EMAIL,
             "password": TEST_ADMIN_PASSWORD
@@ -406,7 +408,7 @@ def test_admin_can_update_other_user():
 
     # Update regular user
     response = client.patch(
-        f"/users/{user_id}",
+        f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"},
         json={"has_subscription": True}
     )
@@ -417,7 +419,7 @@ def test_delete_own_user():
     """Test user can delete their own account"""
     # Create and login
     create_response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -427,7 +429,7 @@ def test_delete_own_user():
     user_id = create_response.json()["id"]
 
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD
@@ -437,14 +439,14 @@ def test_delete_own_user():
 
     # Delete account
     response = client.delete(
-        f"/users/{user_id}",
+        f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 204
 
     # Verify user is deleted
     get_response = client.get(
-        f"/users/{user_id}",
+        f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"}
     )
     assert get_response.status_code == 401  # Token is now invalid
@@ -453,7 +455,7 @@ def test_delete_other_user_forbidden():
     """Test regular user cannot delete another user"""
     # Create two users
     _ = client.post(  # noqa: F841
-        "/users/",
+        f"{BASE}/",
         json={
             "email": "user1@example.com",
             "password": "Pass1234!",
@@ -462,7 +464,7 @@ def test_delete_other_user_forbidden():
     )
 
     user2_response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": "user2@example.com",
             "password": "Pass1234!",
@@ -473,7 +475,7 @@ def test_delete_other_user_forbidden():
 
     # Login as user1
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": "user1@example.com",
             "password": "Pass1234!"
@@ -483,7 +485,7 @@ def test_delete_other_user_forbidden():
 
     # Try to delete user2
     response = client.delete(
-        f"/users/{user2_id}",
+        f"{BASE}/{user2_id}",
         headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 403
@@ -492,7 +494,7 @@ def test_admin_can_delete_other_user():
     """Test admin can delete other users"""
     # Create regular user
     user_response = client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_USER_EMAIL,
             "password": TEST_USER_PASSWORD,
@@ -503,7 +505,7 @@ def test_admin_can_delete_other_user():
 
     # Create admin
     client.post(
-        "/users/",
+        f"{BASE}/",
         json={
             "email": TEST_ADMIN_EMAIL,
             "password": TEST_ADMIN_PASSWORD,
@@ -513,7 +515,7 @@ def test_admin_can_delete_other_user():
 
     # Login as admin
     login_response = client.post(
-        "/users/login",
+        f"{BASE}/login",
         json={
             "email": TEST_ADMIN_EMAIL,
             "password": TEST_ADMIN_PASSWORD
@@ -523,7 +525,7 @@ def test_admin_can_delete_other_user():
 
     # Delete regular user
     response = client.delete(
-        f"/users/{user_id}",
+        f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 204

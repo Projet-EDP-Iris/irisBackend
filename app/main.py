@@ -1,4 +1,5 @@
 import os
+
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,10 +13,10 @@ from app.api.endpoints.suggestion import router as suggestion_router
 from app.api.routes.auth_microsoft import router as microsoft_auth_router
 from app.api.routes.users import router as user_router
 from app.core.config import settings
-from app.db.database import init_db, engine
+from app.db.database import engine, init_db
 from app.models import Base
 
-# 1. Création des tables 
+# 1. Création des tables
 Base.metadata.create_all(bind=engine)
 
 # 2. Configuration de l'application

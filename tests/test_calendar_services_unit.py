@@ -10,14 +10,14 @@ This lets us verify that OUR code (argument building, error handling, return
 values) is correct without depending on external infrastructure.
 """
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
+from cryptography.fernet import Fernet
 
-os.environ.setdefault(
-    "SECRET_ENCRYPTION_KEY", "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU="
-)
+_TEST_KEY = Fernet.generate_key().decode()
+os.environ.setdefault("SECRET_ENCRYPTION_KEY", _TEST_KEY)
 
 
 # ─────────────────────────────────────────────
@@ -27,8 +27,8 @@ os.environ.setdefault(
 class TestGoogleCalendarService:
     """Tests for app/services/google_calendar_service.py"""
 
-    START = datetime(2024, 10, 18, 10, 0, tzinfo=timezone.utc)
-    END   = datetime(2024, 10, 18, 11, 0, tzinfo=timezone.utc)
+    START = datetime(2024, 10, 18, 10, 0, tzinfo=UTC)
+    END   = datetime(2024, 10, 18, 11, 0, tzinfo=UTC)
 
     def _mock_creds(self, valid: bool = True, expired: bool = False):
         creds = MagicMock()
@@ -153,8 +153,8 @@ class TestGoogleCalendarService:
 class TestAppleCalendarService:
     """Tests for app/services/apple_calendar_service.py"""
 
-    START = datetime(2024, 10, 20, 15, 0, tzinfo=timezone.utc)
-    END   = datetime(2024, 10, 20, 16, 0, tzinfo=timezone.utc)
+    START = datetime(2024, 10, 20, 15, 0, tzinfo=UTC)
+    END   = datetime(2024, 10, 20, 16, 0, tzinfo=UTC)
 
     def _encrypted_password(self):
         from app.core.encryption import encrypt

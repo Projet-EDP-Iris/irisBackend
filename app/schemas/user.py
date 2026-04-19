@@ -1,6 +1,6 @@
 import re
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, EmailStr, StringConstraints, field_validator
 
@@ -31,6 +31,11 @@ class UserResponse(BaseModel):
     require_password_reset: bool
     calendar_providers: list[str] = []
     created_at: datetime
+
+    @field_validator("calendar_providers", mode="before")
+    @classmethod
+    def coerce_none_to_list(cls, v: Any) -> list[str]:
+        return v if v is not None else []
     updated_at: datetime
 
     class Config:

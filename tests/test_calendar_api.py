@@ -16,19 +16,19 @@ import os
 from unittest.mock import patch
 
 import pytest
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-os.environ.setdefault(
-    "SECRET_ENCRYPTION_KEY", "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU="
-)
+_TEST_KEY = Fernet.generate_key().decode()
+os.environ.setdefault("SECRET_ENCRYPTION_KEY", _TEST_KEY)
 
-from app.db.database import get_db
-from app.main import app
-from app.models.base import Base
-from app.models.email import Email  # noqa: F401 — needed to register the table
-from app.models.user import User     # noqa: F401
+from app.db.database import get_db  # noqa: E402
+from app.main import app  # noqa: E402
+from app.models.base import Base  # noqa: E402
+from app.models.email import Email  # noqa: E402, F401 — needed to register the table
+from app.models.user import User  # noqa: E402, F401
 
 TEST_DB_URL = "sqlite:///./test_calendar.db"
 test_engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": False})
@@ -120,7 +120,7 @@ class TestCalendarSetup:
             json={"calendar_provider": "google"},
         )
         assert r.status_code == 200
-        assert r.json()["calendar_provider"] == "google"
+        assert "google" in r.json()["calendar_providers"]
 
     def test_setup_apple_provider_with_credentials(self):
         """Saving 'apple' with user + password succeeds."""
@@ -135,7 +135,7 @@ class TestCalendarSetup:
             },
         )
         assert r.status_code == 200
-        assert r.json()["calendar_provider"] == "apple"
+        assert "apple" in r.json()["calendar_providers"]
 
     def test_setup_apple_without_credentials_returns_400(self):
         """'apple' provider with missing credentials must return 400."""
@@ -154,7 +154,7 @@ class TestCalendarSetup:
         r = client.patch(
             "/api/v1/user/users/me/calendar-setup",
             headers=_auth(token),
-            json={"calendar_provider": "outlook"},
+            json={"calendar_provider": "yahoo"},
         )
         assert r.status_code == 400
 
@@ -226,8 +226,8 @@ class TestConfirmCalendar:
         assert r.status_code == 200
         body = r.json()
         assert body["status"] == "confirmed"
-        assert body["provider"] == "google"
-        assert body["event_id"] == "google_event_xyz"
+        assert body["providers"][0]["provider"] == "google"
+        assert body["providers"][0]["event_id"] == "google_event_xyz"
 
     def test_confirm_apple_event_created(self):
         """Confirm with Apple provider: Apple service is called, returns UID."""
@@ -254,8 +254,8 @@ class TestConfirmCalendar:
             )
 
         assert r.status_code == 200
-        assert r.json()["event_id"] == "apple-uid-abc-def"
-        assert r.json()["provider"] == "apple"
+        assert r.json()["providers"][0]["event_id"] == "apple-uid-abc-def"
+        assert r.json()["providers"][0]["provider"] == "apple"
 
     def test_confirm_picks_correct_slot_by_index(self):
         """slot_index=1 must book the second slot, not the first."""
@@ -395,15 +395,16 @@ class TestConfirmCalendar:
         )
         assert r.status_code == 403
 
-    def test_confirm_apple_missing_credentials_returns_400(self):
-        """If provider is 'apple' but credentials were never saved, return 400."""
+    def test_confirm_apple_missing_credentials_returns_error_in_provider(self):
+        """If provider is 'apple' but credentials were never saved, the provider
+        result must contain an error (partial-failure tolerance)."""
         token = _create_and_login()
 
-        # Manually set provider to 'apple' without credentials via DB
+        # Manually set providers to ['apple'] without storing credentials
         db = TestSession()
         user = db.query(User).filter(User.email == USER_EMAIL).first()
+        user.calendar_providers = ["apple"]
         user.calendar_provider = "apple"
-        # apple_caldav_user and apple_caldav_password remain NULL
         db.commit()
         db.close()
 
@@ -414,11 +415,16 @@ class TestConfirmCalendar:
             headers=_auth(token),
             json={"slot_index": 0},
         )
-        assert r.status_code == 400
-        assert "credentials" in r.json()["detail"].lower()
+        assert r.status_code == 200
+        providers = r.json()["providers"]
+        assert len(providers) == 1
+        assert providers[0]["provider"] == "apple"
+        assert providers[0]["error"] is not None
+        assert "credentials" in providers[0]["error"].lower()
 
-    def test_confirm_google_api_error_returns_502(self):
-        """If the Google Calendar API raises an unexpected error, return 502."""
+    def test_confirm_google_api_error_reported_in_providers(self):
+        """If the Google Calendar API raises an error, the response still returns 200
+        (partial-failure tolerance) but the provider entry contains the error."""
         token = _create_and_login()
         client.patch(
             "/api/v1/user/users/me/calendar-setup",
@@ -437,5 +443,8 @@ class TestConfirmCalendar:
                 json={"slot_index": 0},
             )
 
-        assert r.status_code == 502
-        assert "Google Calendar API error" in r.json()["detail"]
+        assert r.status_code == 200
+        providers = r.json()["providers"]
+        assert len(providers) == 1
+        assert providers[0]["provider"] == "google"
+        assert "quota exceeded" in providers[0]["error"].lower()

@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel
-
 from sqlalchemy.orm import Session
-from app.db.database import get_db
-from app.models.email import Email 
+
 from app.core.auth import get_current_active_user
+from app.db.database import get_db
+from app.models.email import Email
 from app.models.user import User
 from app.schemas.detection import ExtractionResult
 from app.schemas.email import EmailItem, FetchAndDetectResponse, FetchDetectPredictResponse
@@ -109,7 +109,7 @@ def post_fetch_detect_predict(
             status="predicted"
         )
         db.add(db_email)
-    
+
     db.commit() # On valide l'enregistrement
     email_items = [
         EmailItem(subject=e.subject, body=e.body, message_id=e.message_id)

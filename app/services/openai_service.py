@@ -1,6 +1,7 @@
 import asyncio
 import random
 
+
 async def generate_mail_suggestions(summary: str):
     """
     VERSION TEST (MOCK) : Simule l'appel à GPT-5.4 Mini.

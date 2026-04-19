@@ -17,7 +17,6 @@ The `state` parameter is an HMAC-signed string containing the user_id, which
 prevents CSRF attacks (a third party can't inject a foreign token for a victim user).
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import RedirectResponse
 
 from app.core.auth import get_current_active_user
 from app.models.user import User

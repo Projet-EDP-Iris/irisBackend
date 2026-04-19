@@ -1,7 +1,10 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
+from app.db.database import get_db
+from app.models.email import Email
 from app.models.user import User
 from app.schemas.detection import ExtractionResult
 from app.schemas.email import EmailItem, FetchAndDetectResponse, FetchDetectPredictResponse
@@ -78,6 +81,7 @@ def post_fetch_detect_predict(
     max_results: int = 10,
     body: FetchDetectPredictBody | None = Body(None),
     current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
 ) -> FetchDetectPredictResponse:
     """Fetch Gmail emails, run detection, then prediction. Returns 404 if Gmail is not connected."""
     svc = GmailService()
@@ -92,6 +96,21 @@ def post_fetch_detect_predict(
     prefs = body.preferences if body else None
     cal = body.calendar if body else None
     suggested_slots = get_suggested_slots(extraction, preferences=prefs, calendar=cal)
+
+    for i, e in enumerate(emails):
+        # On crée l'objet pour la base de données
+        db_email = Email(
+            subject=e.subject,
+            body=e.body,
+            message_id=e.message_id,
+            user_id=current_user.id,
+            summary=extractions[i].summary if i < len(extractions) else None,
+            predicted_slots=[s.dict() for s in suggested_slots] if i == 0 else None,
+            status="predicted"
+        )
+        db.add(db_email)
+
+    db.commit() # On valide l'enregistrement
     email_items = [
         EmailItem(subject=e.subject, body=e.body, message_id=e.message_id)
         for e in emails

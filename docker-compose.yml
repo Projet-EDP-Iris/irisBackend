@@ -1,13 +1,13 @@
 version: '3.8'
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: iris_postgres
+  db:
+    image: postgres:16
+    container_name: iris_db
     environment:
-      POSTGRES_USER: iris_user
-      POSTGRES_PASSWORD: iris_password
-      POSTGRES_DB: iris_db
+      - POSTGRES_USER=user
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=iris_user  # On force le nom que l'API réclame
     ports:
       - "5432:5432"
     volumes:
@@ -18,5 +18,13 @@ services:
       timeout: 5s
       retries: 5
 
-volumes:
-  postgres_data:
+  api:
+    build: .
+    container_name: iris_api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://user:password@db:5432/iris_user
+      - SECRET_KEY=test-secret
+    depends_on:
+      - db

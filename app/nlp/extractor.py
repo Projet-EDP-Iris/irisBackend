@@ -33,6 +33,16 @@ TZ_RE = re.compile(
     re.IGNORECASE,
 )
 LINK_RE = re.compile(r"https?://[^\s<>]+")
+
+# Platform-specific video conferencing URL patterns — ordered highest to lowest specificity.
+# The first pattern that matches wins, so more precise patterns come first.
+_PLATFORM_LINKS: list[tuple[str, re.Pattern[str]]] = [
+    ("zoom",   re.compile(r"https?://(?:[\w-]+\.)?zoom\.us/(?:j|my)/[\w?&=%+.-]+")),
+    ("teams",  re.compile(r"https?://teams\.microsoft\.com/l/meetup-join/[^\s<>]+")),
+    ("meet",   re.compile(r"https?://meet\.google\.com/[a-z]{3}-[a-z]{4}-[a-z]{3}")),
+    ("webex",  re.compile(r"https?://(?:[\w-]+\.)?webex\.com/(?:meet|join)/[^\s<>]+")),
+]
+
 MODALITY_RE = re.compile(
     r"\b(zoom|meet\.google|teams\.microsoft|webex|gotomeeting)\b",
     re.IGNORECASE,
@@ -105,12 +115,24 @@ def _extract_timezone(text: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _extract_meeting_link(text: str) -> str | None:
+def _extract_meeting_link(text: str) -> tuple[str | None, str | None]:
+    """Return (url, platform) where platform is 'zoom'|'teams'|'meet'|'webex'|None.
+
+    Platform-specific patterns take priority over generic URL matching so that
+    a Zoom join link is preferred over an arbitrary https URL in the same email.
+    """
+    for platform, pattern in _PLATFORM_LINKS:
+        m = pattern.search(text)
+        if m:
+            return m.group(0), platform
     m = LINK_RE.search(text)
-    return m.group(0) if m else None
+    return (m.group(0), None) if m else (None, None)
 
 
-def _extract_modality(text: str) -> str | None:
+def _extract_modality(text: str, link_platform: str | None = None) -> str | None:
+    """Return video-call platform name, preferring the link-derived platform."""
+    if link_platform:
+        return link_platform
     m = MODALITY_RE.search(text)
     return m.group(1).lower() if m else None
 
@@ -179,8 +201,8 @@ class EmailExtractor:
         proposed_times = _extract_times(text)
         duration_minutes = _extract_duration_minutes(text)
         timezone = _extract_timezone(text)
-        meeting_link = _extract_meeting_link(text)
-        modality = _extract_modality(text)
+        meeting_link, link_platform = _extract_meeting_link(text)
+        modality = _extract_modality(text, link_platform)
         participants = _extract_participants(text)
         organizer = participants[0] if participants else None
         thread_status = _thread_status(text)

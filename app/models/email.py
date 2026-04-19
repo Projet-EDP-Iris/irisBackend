@@ -31,4 +31,10 @@ class Email(Base):
     generated_suggestion = Column(Text, nullable=True)
 
     # Statut pour le suivi du workflow
-    status = Column(String, default="pending") # pending, detected, predicted, completed
+    status = Column(String, default="pending") # pending, detected, predicted, confirmed, completed
+
+    # Calendar integration — filled after one-click confirm
+    calendar_event_id = Column(String, nullable=True)
+    # Legacy single-provider event ID — kept for backwards compatibility
+    calendar_event_ids = Column(JSON, nullable=True)
+    # Multi-provider dict e.g. {"google": "evt_abc", "apple": "uid-xyz", "outlook": "AAMk..."}

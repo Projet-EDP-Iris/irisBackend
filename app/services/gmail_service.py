@@ -15,6 +15,8 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
     "https://www.googleapis.com/auth/userinfo.email",
     "openid",
+    "https://www.googleapis.com/auth/calendar",  # write events for one-click calendar
+    "https://www.googleapis.com/auth/tasks",      # create tasks after confirming a meeting
 ]
 
 TOKENS_DIR = "tokens"

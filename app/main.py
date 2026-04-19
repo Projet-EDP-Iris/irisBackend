@@ -5,9 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 # Imports des routers
+from app.api.endpoints.calendar import router as calendar_router
 from app.api.endpoints.emails import router as email_router
 from app.api.endpoints.prediction import router as prediction_router
 from app.api.endpoints.suggestion import router as suggestion_router
+from app.api.routes.auth_microsoft import router as microsoft_auth_router
 from app.api.routes.users import router as user_router
 from app.core.config import settings
 from app.db.database import init_db, engine
@@ -31,6 +33,8 @@ app = FastAPI(
         {"name": "emails", "description": "Gmail fetch and pipeline management."},
         {"name": "prediction", "description": "Suggested meeting slots output."},
         {"name": "suggestion", "description": "AI-generated email response suggestions."},
+        {"name": "calendar", "description": "One-click calendar event creation (Google, Apple, Outlook)."},
+        {"name": "auth", "description": "OAuth flows — Microsoft/Outlook account connection."},
     ],
 )
 
@@ -68,6 +72,8 @@ app.include_router(user_router, prefix="/api/v1/user", tags=["users"])
 app.include_router(email_router, prefix="/emails", tags=["emails"])
 app.include_router(prediction_router, prefix="/predictions", tags=["predictions"])
 app.include_router(suggestion_router, prefix="/suggestions", tags=["suggestions"])
+app.include_router(calendar_router, prefix="/api/v1", tags=["calendar"])
+app.include_router(microsoft_auth_router, prefix="/api/v1", tags=["auth"])
 
 # 6. Fichiers statiques
 if os.path.exists("app/static"):

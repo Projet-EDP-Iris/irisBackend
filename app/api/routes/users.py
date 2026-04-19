@@ -1,8 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.config import settings
+from app.core.encryption import encrypt
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.database import get_db
 from app.models.user import User
@@ -139,6 +141,92 @@ def update_user(
     db.commit()
     db.refresh(user)
     return user
+
+_VALID_PROVIDERS = {"google", "apple", "outlook"}
+
+
+class CalendarSetupRequest(BaseModel):
+    calendar_provider: str
+    # "google", "apple", or "outlook"
+    apple_caldav_user: str | None = None
+    # Required when calendar_provider == "apple": the user's Apple ID email
+    apple_caldav_password: str | None = None
+    # Required when calendar_provider == "apple": App Password from appleid.apple.com
+    # Sent in plain text over HTTPS; stored Fernet-encrypted in the DB.
+    # For "outlook": complete the OAuth flow via GET /api/v1/auth/microsoft first.
+
+
+@router.patch("/me/calendar-setup", response_model=UserResponse)
+def setup_calendar(
+    body: CalendarSetupRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Add a calendar provider to the user's active providers list.
+
+    Each call APPENDS the provider — calling this twice with "google" then
+    "apple" results in both being active. Use DELETE /me/calendar-disconnect
+    to remove a provider.
+
+    - google: no extra credentials needed (reuses Gmail OAuth token)
+    - apple: requires apple_caldav_user + apple_caldav_password (App Password)
+    - outlook: OAuth must be completed first via GET /api/v1/auth/microsoft
+    """
+    provider = body.calendar_provider
+    if provider not in _VALID_PROVIDERS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"calendar_provider must be one of: {', '.join(sorted(_VALID_PROVIDERS))}",
+        )
+
+    if provider == "apple":
+        if not body.apple_caldav_user or not body.apple_caldav_password:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="apple_caldav_user and apple_caldav_password are required for Apple Calendar",
+            )
+        current_user.apple_caldav_user = body.apple_caldav_user
+        current_user.apple_caldav_password = encrypt(body.apple_caldav_password)
+
+    # Append to calendar_providers list (deduplicated)
+    current_providers: list[str] = list(current_user.calendar_providers or [])
+    if provider not in current_providers:
+        current_providers.append(provider)
+    current_user.calendar_providers = current_providers
+    # Keep legacy field in sync for backwards compatibility
+    current_user.calendar_provider = provider
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@router.delete("/me/calendar-disconnect", response_model=UserResponse)
+def disconnect_calendar(
+    provider: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Remove a calendar provider from the user's active providers list.
+    Pass provider as a query parameter, e.g. ?provider=apple
+    """
+    current_providers: list[str] = list(current_user.calendar_providers or [])
+    if provider not in current_providers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Provider '{provider}' is not currently connected",
+        )
+    current_providers.remove(provider)
+    current_user.calendar_providers = current_providers
+    if current_user.calendar_provider == provider:
+        current_user.calendar_provider = current_providers[-1] if current_providers else None
+
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(

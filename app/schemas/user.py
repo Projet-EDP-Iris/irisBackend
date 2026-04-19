@@ -29,6 +29,7 @@ class UserResponse(BaseModel):
     bank_account_id: str | None = None
     oauth_provider: str | None = None
     require_password_reset: bool
+    calendar_providers: list[str] = []
     created_at: datetime
     updated_at: datetime
 

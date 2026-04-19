@@ -46,8 +46,10 @@ def override_get_db():
 app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
-USER_EMAIL    = "caltest@example.com"
-USER_PASSWORD = "CalTest1!"
+USER_EMAIL = "caltest@example.test"
+USER_PASSWORD = "TEST_USER_LOGIN_VALUE_123"
+APPLE_CALDAV_USER = "apple-calendar-user@example.test"
+APPLE_CALDAV_PASSWORD = "TEST_APPLE_CALDAV_VALUE_123"
 
 
 @pytest.fixture(autouse=True)
@@ -130,8 +132,8 @@ class TestCalendarSetup:
             headers=_auth(token),
             json={
                 "calendar_provider": "apple",
-                "apple_caldav_user": "dan@icloud.com",
-                "apple_caldav_password": "xxxx-xxxx-xxxx-xxxx",
+                "apple_caldav_user": APPLE_CALDAV_USER,
+                "apple_caldav_password": APPLE_CALDAV_PASSWORD,
             },
         )
         assert r.status_code == 200
@@ -171,13 +173,13 @@ class TestCalendarSetup:
         from app.core.encryption import decrypt
 
         token = _create_and_login()
-        plain_password = "xxxx-xxxx-xxxx-xxxx"
+        plain_password = APPLE_CALDAV_PASSWORD
         client.patch(
             "/api/v1/user/users/me/calendar-setup",
             headers=_auth(token),
             json={
                 "calendar_provider": "apple",
-                "apple_caldav_user": "dan@icloud.com",
+                "apple_caldav_user": APPLE_CALDAV_USER,
                 "apple_caldav_password": plain_password,
             },
         )
@@ -237,8 +239,8 @@ class TestConfirmCalendar:
             headers=_auth(token),
             json={
                 "calendar_provider": "apple",
-                "apple_caldav_user": "dan@icloud.com",
-                "apple_caldav_password": "xxxx-xxxx-xxxx-xxxx",
+                "apple_caldav_user": APPLE_CALDAV_USER,
+                "apple_caldav_password": APPLE_CALDAV_PASSWORD,
             },
         )
         email_id = _seed_email_with_slots(token)

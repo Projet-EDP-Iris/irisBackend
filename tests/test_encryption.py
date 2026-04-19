@@ -15,23 +15,28 @@ os.environ.setdefault("SECRET_ENCRYPTION_KEY", _TEST_KEY)
 
 from app.core.encryption import decrypt, encrypt  # noqa: E402
 
+TEST_SECRET_VALUE = "TEST_ENCRYPTION_VALUE_123"
+TEST_REPEAT_VALUE = "TEST_REPEATABLE_INPUT_VALUE"
+TEST_UNICODE_VALUE = "tëst-välüe-ünïcödé"
+TEST_INVALID_TOKEN = "NOT_A_VALID_FERNET_TOKEN_TEST_VALUE"
+
 # --- Round-trip ---
 
 def test_encrypt_decrypt_round_trip():
     """Encrypting then decrypting must return the original value."""
-    original = "xxxx-xxxx-xxxx-xxxx"
+    original = TEST_SECRET_VALUE
     assert decrypt(encrypt(original)) == original
 
 
 def test_encrypt_produces_different_output_each_time():
     """Fernet uses a random IV, so two encryptions of the same value differ."""
-    value = "my-app-password"
+    value = TEST_REPEAT_VALUE
     assert encrypt(value) != encrypt(value)
 
 
 def test_decrypt_round_trip_with_unicode():
     """Non-ASCII passwords (accented characters, etc.) survive the round-trip."""
-    original = "pàssw0rd-ünïcödé"
+    original = TEST_UNICODE_VALUE
     assert decrypt(encrypt(original)) == original
 
 
@@ -40,7 +45,7 @@ def test_decrypt_round_trip_with_unicode():
 def test_decrypt_raises_on_corrupted_token():
     """A tampered or garbage token must raise ValueError, not crash silently."""
     with pytest.raises(ValueError, match="Failed to decrypt"):
-        decrypt("this-is-not-a-valid-fernet-token")
+        decrypt(TEST_INVALID_TOKEN)
 
 
 def test_decrypt_raises_on_empty_string():

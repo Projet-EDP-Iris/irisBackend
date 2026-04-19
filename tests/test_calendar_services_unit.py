@@ -19,6 +19,10 @@ from cryptography.fernet import Fernet
 _TEST_KEY = Fernet.generate_key().decode()
 os.environ.setdefault("SECRET_ENCRYPTION_KEY", _TEST_KEY)
 
+TEST_APPLE_USER = "apple-calendar-user@example.test"
+TEST_APPLE_CALDAV_PASSWORD = "TEST_APPLE_CALDAV_VALUE_123"
+TEST_DECRYPTION_PLAINTEXT = "TEST_DECRYPTED_PASSWORD_VALUE"
+
 
 # ─────────────────────────────────────────────
 # Google Calendar Service
@@ -158,7 +162,7 @@ class TestAppleCalendarService:
 
     def _encrypted_password(self):
         from app.core.encryption import encrypt
-        return encrypt("xxxx-xxxx-xxxx-xxxx")
+        return encrypt(TEST_APPLE_CALDAV_PASSWORD)
 
     def test_creates_event_and_returns_uid(self):
         """
@@ -174,7 +178,7 @@ class TestAppleCalendarService:
 
             from app.services.apple_calendar_service import create_apple_calendar_event
             uid = create_apple_calendar_event(
-                apple_user="dan@icloud.com",
+                apple_user=TEST_APPLE_USER,
                 encrypted_password=self._encrypted_password(),
                 summary="Réunion démo",
                 start_time=self.START,
@@ -188,8 +192,8 @@ class TestAppleCalendarService:
         # The CalDAV client was instantiated with the correct URL and credentials
         mock_client_cls.assert_called_once_with(
             url="https://caldav.icloud.com",
-            username="dan@icloud.com",
-            password="xxxx-xxxx-xxxx-xxxx",
+            username=TEST_APPLE_USER,
+            password=TEST_APPLE_CALDAV_PASSWORD,
         )
 
         # save_event was called on the calendar
@@ -212,7 +216,7 @@ class TestAppleCalendarService:
 
             from app.services.apple_calendar_service import create_apple_calendar_event
             create_apple_calendar_event(
-                apple_user="dan@icloud.com",
+                apple_user=TEST_APPLE_USER,
                 encrypted_password=self._encrypted_password(),
                 summary="Démo produit",
                 start_time=self.START,
@@ -238,7 +242,7 @@ class TestAppleCalendarService:
             from app.services.apple_calendar_service import create_apple_calendar_event
             with pytest.raises(RuntimeError, match="No iCloud calendars"):
                 create_apple_calendar_event(
-                    apple_user="dan@icloud.com",
+                    apple_user=TEST_APPLE_USER,
                     encrypted_password=self._encrypted_password(),
                     summary="X",
                     start_time=self.START,
@@ -249,7 +253,7 @@ class TestAppleCalendarService:
         """The service must decrypt the stored password before passing it to CalDAV."""
         from app.core.encryption import encrypt
 
-        plain = "secret-app-password"
+        plain = TEST_DECRYPTION_PLAINTEXT
         encrypted = encrypt(plain)
 
         mock_calendar = MagicMock()
@@ -261,7 +265,7 @@ class TestAppleCalendarService:
 
             from app.services.apple_calendar_service import create_apple_calendar_event
             create_apple_calendar_event(
-                apple_user="user@icloud.com",
+                apple_user=TEST_APPLE_USER,
                 encrypted_password=encrypted,
                 summary="X",
                 start_time=self.START,

@@ -4,7 +4,9 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, EmailStr, StringConstraints, field_validator
 
-Password = Annotated[str, StringConstraints(min_length=8, max_length=14)]
+# Fix: max_length raised from 14 → 72 (bcrypt limit; longer passwords are better security)
+Password = Annotated[str, StringConstraints(min_length=8, max_length=72)]
+
 
 class UserCreate(BaseModel):
     email: EmailStr
@@ -19,6 +21,7 @@ class UserCreate(BaseModel):
         if not re.search(r"[@$!%*?&]", v):
             raise ValueError("Password must include at least one special character @$!%*?&")
         return v
+
 
 class UserResponse(BaseModel):
     id: int
@@ -36,10 +39,12 @@ class UserResponse(BaseModel):
     @classmethod
     def coerce_none_to_list(cls, v: Any) -> list[str]:
         return v if v is not None else []
+
     updated_at: datetime
 
     class Config:
         from_attributes = True
+
 
 class UserUpdate(BaseModel):
     email: EmailStr | None = None
@@ -60,13 +65,16 @@ class UserUpdate(BaseModel):
             raise ValueError("Password must include at least one special character @$!%*?&")
         return v
 
+
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
 
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
 
 class TokenPayload(BaseModel):
     sub: str

@@ -24,9 +24,15 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description=(
-        "Backend API for Iris: user authentication (JWT), email detection (NLP extraction from raw emails), "
-        "Gmail integration, and slot prediction. "
-        "Most endpoints require Authorization: Bearer <token>."
+        "Backend API for Iris — an AI-powered email-to-calendar assistant.\n\n"
+        "**Auth:** Register at `POST /api/v1/users/` then log in at `POST /api/v1/users/login` to get a Bearer token. "
+        "Pass it as `Authorization: Bearer <token>` on all protected endpoints.\n\n"
+        "**Pipeline:** Fetch Gmail → detect meeting intent (NLP) → predict slots → confirm to calendar.\n\n"
+        "**Calendar integrations:** Google Calendar (via Gmail OAuth), Apple Calendar (CalDAV App Password), "
+        "Outlook/Office 365 (Microsoft OAuth — start at `GET /api/v1/auth/microsoft`).\n\n"
+        "**AI suggestions:** Generate 3 reply variants inline via `POST /api/v1/suggest-inline`, "
+        "or from a stored email via `POST /api/v1/suggest/{email_id}`.\n\n"
+        "**One-click confirm:** `POST /api/v1/calendar/confirm/{email_id}` creates events in all connected calendars at once."
     ),
     version="0.1.0",
     openapi_tags=[
@@ -70,8 +76,8 @@ def startup_event():
     init_db()
 
 # 5. Inclusion des Routes
-app.include_router(user_router, prefix="/api/v1/user", tags=["users"])
-app.include_router(detection_router, tags=["detection"])
+app.include_router(user_router, prefix="/api/v1", tags=["users"])
+app.include_router(detection_router, prefix="/api/v1", tags=["detection"])
 app.include_router(email_router, prefix="/api/v1", tags=["emails"])
 app.include_router(prediction_router, prefix="/api/v1", tags=["predictions"])
 app.include_router(suggestion_router, prefix="/api/v1", tags=["suggestions"])

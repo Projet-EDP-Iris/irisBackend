@@ -104,8 +104,8 @@ def post_fetch_detect_predict(
             body=e.body,
             message_id=e.message_id,
             user_id=current_user.id,
-            summary=extractions[i].summary if i < len(extractions) else None,
-            predicted_slots=[s.dict() for s in suggested_slots] if i == 0 else None,
+            summary=None,
+            predicted_slots=[s.model_dump(mode="json") for s in suggested_slots] if i == 0 else None,
             status="predicted"
         )
         db.add(db_email)

@@ -6,7 +6,7 @@ client = TestClient(app)
 
 def test_predict_slots():
     payload = {
-        "results": [{"duration_minutes": 30, "classification": "meeting"}]
+        "extraction": {"duration_minutes": 30, "classification": "meeting_schedule"}
     }
     response = client.post("/api/v1/predict/slots/from-detection", json=payload)
     assert response.status_code == 200

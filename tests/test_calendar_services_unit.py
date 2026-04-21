@@ -39,6 +39,7 @@ class TestGoogleCalendarService:
         creds.valid = valid
         creds.expired = expired
         creds.refresh_token = "fake-refresh-token" if expired else None
+        creds.to_json.return_value = '{"token": "refreshed"}'
         return creds
 
     def test_creates_event_and_returns_id(self, tmp_path):

@@ -1,6 +1,6 @@
 """
 API integration tests for the calendar endpoints:
-  PATCH /api/v1/user/users/me/calendar-setup  — save provider + Apple credentials
+  PATCH /api/v1/users/me/calendar-setup  — save provider + Apple credentials
   POST  /api/v1/calendar/confirm/{email_id}   — create event in one click
 
 These tests use an in-memory SQLite database and mock out all external
@@ -46,10 +46,10 @@ def override_get_db():
 app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
-USER_EMAIL = "caltest@example.test"
-USER_PASSWORD = "TEST_USER_LOGIN_VALUE_123"
-APPLE_CALDAV_USER = "apple-calendar-user@example.test"
-APPLE_CALDAV_PASSWORD = "TEST_APPLE_CALDAV_VALUE_123"
+USER_EMAIL = "caltest@example.com"
+USER_PASSWORD = "TestUser!123"
+APPLE_CALDAV_USER = "apple-calendar-user@example.com"
+APPLE_CALDAV_PASSWORD = "TestApple!123"
 
 
 @pytest.fixture(autouse=True)
@@ -67,11 +67,11 @@ def reset_db():
 def _create_and_login():
     """Create a test user and return their Bearer token."""
     client.post(
-        "/api/v1/user/users/",
+        "/api/v1/users/",
         json={"email": USER_EMAIL, "password": USER_PASSWORD, "role": "regular"},
     )
     r = client.post(
-        "/api/v1/user/users/login",
+        "/api/v1/users/login",
         json={"email": USER_EMAIL, "password": USER_PASSWORD},
     )
     return r.json()["access_token"]
@@ -117,7 +117,7 @@ class TestCalendarSetup:
         """Saving 'google' as provider succeeds with no extra credentials."""
         token = _create_and_login()
         r = client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={"calendar_provider": "google"},
         )
@@ -128,7 +128,7 @@ class TestCalendarSetup:
         """Saving 'apple' with user + password succeeds."""
         token = _create_and_login()
         r = client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={
                 "calendar_provider": "apple",
@@ -143,7 +143,7 @@ class TestCalendarSetup:
         """'apple' provider with missing credentials must return 400."""
         token = _create_and_login()
         r = client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={"calendar_provider": "apple"},  # no apple_caldav_user / password
         )
@@ -154,7 +154,7 @@ class TestCalendarSetup:
         """An unknown provider name must return 400."""
         token = _create_and_login()
         r = client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={"calendar_provider": "yahoo"},
         )
@@ -163,7 +163,7 @@ class TestCalendarSetup:
     def test_setup_unauthenticated_returns_403(self):
         """Calendar setup requires authentication."""
         r = client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             json={"calendar_provider": "google"},
         )
         assert r.status_code == 403
@@ -175,7 +175,7 @@ class TestCalendarSetup:
         token = _create_and_login()
         plain_password = APPLE_CALDAV_PASSWORD
         client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={
                 "calendar_provider": "apple",
@@ -209,7 +209,7 @@ class TestConfirmCalendar:
         token = _create_and_login()
         # Set user's calendar provider to Google
         client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={"calendar_provider": "google"},
         )
@@ -235,7 +235,7 @@ class TestConfirmCalendar:
         """Confirm with Apple provider: Apple service is called, returns UID."""
         token = _create_and_login()
         client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={
                 "calendar_provider": "apple",
@@ -263,7 +263,7 @@ class TestConfirmCalendar:
         """slot_index=1 must book the second slot, not the first."""
         token = _create_and_login()
         client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={"calendar_provider": "google"},
         )
@@ -287,7 +287,7 @@ class TestConfirmCalendar:
         """After confirm, Email.calendar_event_id and Email.status must be updated in DB."""
         token = _create_and_login()
         client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={"calendar_provider": "google"},
         )
@@ -314,7 +314,7 @@ class TestConfirmCalendar:
         """Requesting slot_index=99 when only 2 slots exist must return 400."""
         token = _create_and_login()
         client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={"calendar_provider": "google"},
         )
@@ -332,7 +332,7 @@ class TestConfirmCalendar:
         """Confirming a non-existent email ID must return 404."""
         token = _create_and_login()
         client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={"calendar_provider": "google"},
         )
@@ -348,7 +348,7 @@ class TestConfirmCalendar:
         """If the email has no predicted slots yet, return 400."""
         token = _create_and_login()
         client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={"calendar_provider": "google"},
         )
@@ -429,7 +429,7 @@ class TestConfirmCalendar:
         (partial-failure tolerance) but the provider entry contains the error."""
         token = _create_and_login()
         client.patch(
-            "/api/v1/user/users/me/calendar-setup",
+            "/api/v1/users/me/calendar-setup",
             headers=_auth(token),
             json={"calendar_provider": "google"},
         )

@@ -24,7 +24,7 @@ app.dependency_overrides[get_db] = override_get_db
 
 client = TestClient(app)
 
-BASE = "/api/v1/user/users"
+BASE = "/api/v1/users"
 
 # Test data
 TEST_USER_EMAIL = "testuser@example.com"

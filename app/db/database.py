@@ -20,7 +20,7 @@ if _db_url.startswith("sqlite"):
         future=True
     )
 else:
-    engine = create_engine(_db_url, future=True)
+    engine = create_engine(_db_url, future=True, pool_pre_ping=True)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 

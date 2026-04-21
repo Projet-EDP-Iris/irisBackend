@@ -5,9 +5,9 @@ services:
     image: postgres:16
     container_name: iris_db
     environment:
-      - POSTGRES_USER=user
-      - POSTGRES_PASSWORD=password
-      - POSTGRES_DB=iris_user  # On force le nom que l'API réclame
+      - POSTGRES_USER=iris_user
+      - POSTGRES_PASSWORD=iris_password
+      - POSTGRES_DB=iris_db
     ports:
       - "5432:5432"
     volumes:
@@ -24,7 +24,8 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://user:password@db:5432/iris_user
+      - DATABASE_URL=postgresql://iris_user:iris_password@db:5432/iris_db
       - SECRET_KEY=test-secret
     depends_on:
-      - db
+      db:
+        condition: service_healthy

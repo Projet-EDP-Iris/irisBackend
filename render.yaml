@@ -17,7 +17,7 @@ services:
       pip install -r requirements.txt
       python -m spacy download en_core_web_lg
       python -m spacy download fr_core_news_sm
-      python -c "import nltk; nltk.download('punkt'); nltk.download('stopwords')"
+      python -c "import nltk; nltk.download('punkt_tab'); nltk.download('stopwords')"
 
     # Start Command
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
@@ -52,6 +52,31 @@ services:
       # Environment setting (helps with logging and behavior)
       - key: ENVIRONMENT
         value: production
+
+      # Encryption key for Apple Calendar passwords stored in DB
+      # Generate: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+      - key: SECRET_ENCRYPTION_KEY
+        sync: false
+
+      # OpenAI — required for AI suggestion features
+      - key: OPENAI_API_KEY
+        sync: false
+
+      # Google / Gmail OAuth — required for Gmail integration
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GMAIL_REDIRECT_URI
+        sync: false  # Set to: https://<your-render-service>.onrender.com/emails/oauth/callback
+
+      # Microsoft / Outlook OAuth — required for Outlook calendar/tasks integration
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_REDIRECT_URI
+        sync: false  # Set to: https://<your-render-service>.onrender.com/api/v1/auth/microsoft/callback
 
 # Optional: Background Workers (for future async tasks like email processing)
 # Uncomment when you add background job processing

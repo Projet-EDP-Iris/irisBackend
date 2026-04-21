@@ -56,11 +56,11 @@ def setup_database(client_with_db):
 @pytest.fixture
 def auth_headers(client_with_db, setup_database):
     client_with_db.post(
-        "/api/v1/user/users/",
+        "/api/v1/users/",
         json={"email": "emails@example.com", "password": "Secret12!", "role": "regular"},
     )
     login = client_with_db.post(
-        "/api/v1/user/users/login",
+        "/api/v1/users/login",
         json={"email": "emails@example.com", "password": "Secret12!"},
     )
     token = login.json()["access_token"]

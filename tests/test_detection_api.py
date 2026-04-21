@@ -53,11 +53,11 @@ def setup_database(client_with_db):
 @pytest.fixture
 def auth_headers(client_with_db, setup_database):
     client_with_db.post(
-        "/api/v1/user/users/",
+        "/api/v1/users/",
         json={"email": "detect@example.com", "password": "Secret12!", "role": "regular"},
     )
     login = client_with_db.post(
-        "/api/v1/user/users/login",
+        "/api/v1/users/login",
         json={"email": "detect@example.com", "password": "Secret12!"},
     )
     token = login.json()["access_token"]
@@ -65,12 +65,12 @@ def auth_headers(client_with_db, setup_database):
 
 
 def test_detect_unauthorized(client_with_db, setup_database):
-    for path in ["/detect", "/detect/thread", "/validate", "/feedback"]:
-        if path == "/detect":
+    for path in ["/api/v1/detect", "/api/v1/detect/thread", "/api/v1/validate", "/api/v1/feedback"]:
+        if path == "/api/v1/detect":
             body = {"emails": [{"subject": "x", "body": "y"}]}
-        elif path == "/detect/thread":
+        elif path == "/api/v1/detect/thread":
             body = {"messages": [{"subject": "x", "body": "y"}]}
-        elif path == "/validate":
+        elif path == "/api/v1/validate":
             body = {"extraction": {}}
         else:
             body = {"message_id": "m1", "original_extraction": {}, "corrections": {}}
@@ -80,7 +80,7 @@ def test_detect_unauthorized(client_with_db, setup_database):
 
 def test_detect_english_meeting(client_with_db, setup_database, auth_headers):
     r = client_with_db.post(
-        "/detect",
+        "/api/v1/detect",
         headers=auth_headers,
         json={"emails": [{"subject": "Meeting tomorrow", "body": "Can we schedule a call tomorrow at 3pm?"}]},
     )
@@ -93,7 +93,7 @@ def test_detect_english_meeting(client_with_db, setup_database, auth_headers):
 
 def test_detect_french_meeting(client_with_db, setup_database, auth_headers):
     r = client_with_db.post(
-        "/detect",
+        "/api/v1/detect",
         headers=auth_headers,
         json={"emails": [{"subject": "Réunion", "body": "Réunion mardi prochain à 10h."}]},
     )
@@ -103,7 +103,7 @@ def test_detect_french_meeting(client_with_db, setup_database, auth_headers):
 
 def test_detect_cancellation(client_with_db, setup_database, auth_headers):
     r = client_with_db.post(
-        "/detect",
+        "/api/v1/detect",
         headers=auth_headers,
         json={"emails": [{"subject": "Cancelled", "body": "The meeting is cancelled."}]},
     )
@@ -113,7 +113,7 @@ def test_detect_cancellation(client_with_db, setup_database, auth_headers):
 
 def test_detect_batch(client_with_db, setup_database, auth_headers):
     r = client_with_db.post(
-        "/detect",
+        "/api/v1/detect",
         headers=auth_headers,
         json={
             "emails": [
@@ -128,7 +128,7 @@ def test_detect_batch(client_with_db, setup_database, auth_headers):
 
 def test_detect_thread_confirmed(client_with_db, setup_database, auth_headers):
     r = client_with_db.post(
-        "/detect/thread",
+        "/api/v1/detect/thread",
         headers=auth_headers,
         json={
             "messages": [
@@ -145,7 +145,7 @@ def test_detect_thread_confirmed(client_with_db, setup_database, auth_headers):
 
 def test_validate_missing_timezone(client_with_db, setup_database, auth_headers):
     r = client_with_db.post(
-        "/validate",
+        "/api/v1/validate",
         headers=auth_headers,
         json={
             "extraction": {
@@ -164,7 +164,7 @@ def test_validate_missing_timezone(client_with_db, setup_database, auth_headers)
 
 def test_feedback_creates_row(client_with_db, setup_database, auth_headers):
     r = client_with_db.post(
-        "/feedback",
+        "/api/v1/feedback",
         headers=auth_headers,
         json={
             "message_id": "msg-123",

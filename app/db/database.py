@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 from app.core.config import settings
@@ -41,3 +41,9 @@ def init_db():
     Called on application startup.
     """
     Base.metadata.create_all(bind=engine)
+
+    # Lightweight migration for existing deployments that predate profile_icon.
+    with engine.begin() as connection:
+        user_columns = {col["name"] for col in inspect(connection).get_columns("users")}
+        if "profile_icon" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN profile_icon VARCHAR(50)"))

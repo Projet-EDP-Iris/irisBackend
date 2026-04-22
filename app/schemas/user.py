@@ -11,6 +11,8 @@ Password = Annotated[str, StringConstraints(min_length=8, max_length=72)]
 class UserCreate(BaseModel):
     email: EmailStr
     password: Password
+    name: str | None = None
+    profile_icon: str | None = None
     role: str = "regular"
 
     @field_validator("password")
@@ -27,6 +29,7 @@ class UserResponse(BaseModel):
     id: int
     email: EmailStr
     name: str | None = None
+    profile_icon: str | None = None
     role: str
     has_subscription: bool
     bank_account_id: str | None = None
@@ -50,6 +53,7 @@ class UserUpdate(BaseModel):
     email: EmailStr | None = None
     password: Password | None = None
     name: str | None = None
+    profile_icon: str | None = None
     role: str | None = None
     has_subscription: bool | None = None
     bank_account_id: str | None = None

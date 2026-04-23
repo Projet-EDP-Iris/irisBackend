@@ -96,6 +96,24 @@ def test_get_emails_returns_list_with_subject_body_message_id(mock_gmail, client
     assert data[0]["message_id"] == "msg_1"
 
 
+@patch("app.api.endpoints.emails.get_token_path_for_user")
+@patch("app.api.endpoints.emails.GmailService")
+def test_get_emails_invalid_stored_connection_returns_503(
+    mock_gmail, mock_token_path, client_with_db, setup_database, auth_headers, tmp_path
+):
+    token_file = tmp_path / "gmail_user_1.json"
+    token_file.write_text('{"gmail_email":"broken@example.com"}')
+    mock_token_path.return_value = str(token_file)
+    mock_svc = MagicMock()
+    mock_svc.authenticate_for_user.return_value = False
+    mock_gmail.return_value = mock_svc
+
+    r = client_with_db.get("/api/v1/emails", headers=auth_headers)
+
+    assert r.status_code == 503
+    assert "Please reconnect Gmail" in r.json().get("detail", "")
+
+
 def test_fetch_and_detect_unauthorized(client_with_db, setup_database):
     r = client_with_db.post("/api/v1/emails/fetch-and-detect")
     assert r.status_code == 403

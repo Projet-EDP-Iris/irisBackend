@@ -10,6 +10,7 @@ from app.api.endpoints.calendar import router as calendar_router
 from app.api.endpoints.emails import router as email_router
 from app.api.endpoints.prediction import router as prediction_router
 from app.api.endpoints.suggestion import router as suggestion_router
+from app.api.routes.auth_google import router as google_auth_router
 from app.api.routes.auth_microsoft import router as microsoft_auth_router
 from app.api.routes.detection import router as detection_router
 from app.api.routes.users import router as user_router
@@ -82,6 +83,7 @@ app.include_router(email_router, prefix="/api/v1", tags=["emails"])
 app.include_router(prediction_router, prefix="/api/v1", tags=["predictions"])
 app.include_router(suggestion_router, prefix="/api/v1", tags=["suggestions"])
 app.include_router(calendar_router, prefix="/api/v1", tags=["calendar"])
+app.include_router(google_auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(microsoft_auth_router, prefix="/api/v1", tags=["auth"])
 
 # 6. Fichiers statiques

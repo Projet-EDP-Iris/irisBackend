@@ -1,3 +1,5 @@
+import os
+
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -10,7 +12,7 @@ from app.schemas.detection import ExtractionResult
 from app.schemas.email import EmailItem, FetchAndDetectResponse, FetchDetectPredictResponse
 from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
 from app.services.detection import detect_batch
-from app.services.gmail_service import GmailService
+from app.services.gmail_service import GmailService, get_token_path_for_user
 from app.services.prediction_service import get_suggested_slots
 
 router = APIRouter(tags=["emails"])
@@ -18,10 +20,16 @@ router = APIRouter(tags=["emails"])
 
 def _get_emails_for_user(user_id: int, max_results: int = 10) -> list[EmailItem]:
     svc = GmailService()
+    token_path = get_token_path_for_user(user_id)
     if not svc.authenticate_for_user(user_id):
+        if not os.path.exists(token_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Gmail not connected for this user",
+            )
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Gmail not connected for this user",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stored Gmail connection is invalid. Please reconnect Gmail.",
         )
     raw = svc.fetch_recent_emails(n=max_results)
     return [
@@ -52,10 +60,16 @@ def post_fetch_and_detect(
 ) -> FetchAndDetectResponse:
     """Fetch recent Gmail emails and run detection on each. Returns 404 if Gmail is not connected."""
     svc = GmailService()
+    token_path = get_token_path_for_user(current_user.id)
     if not svc.authenticate_for_user(current_user.id):
+        if not os.path.exists(token_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Gmail not connected for this user",
+            )
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Gmail not connected for this user",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stored Gmail connection is invalid. Please reconnect Gmail.",
         )
     emails = svc.fetch_recent_emails_as_inputs(n=max_results)
     extractions = detect_batch(emails)
@@ -85,10 +99,16 @@ def post_fetch_detect_predict(
 ) -> FetchDetectPredictResponse:
     """Fetch Gmail emails, run detection, then prediction. Returns 404 if Gmail is not connected."""
     svc = GmailService()
+    token_path = get_token_path_for_user(current_user.id)
     if not svc.authenticate_for_user(current_user.id):
+        if not os.path.exists(token_path):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Gmail not connected for this user",
+            )
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Gmail not connected for this user",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stored Gmail connection is invalid. Please reconnect Gmail.",
         )
     emails = svc.fetch_recent_emails_as_inputs(n=max_results)
     extractions = detect_batch(emails)

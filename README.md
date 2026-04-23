@@ -38,7 +38,8 @@ OPENAI_API_KEY=<your-openai-key>
 # for the core flow. Optional overrides:
 GOOGLE_CLIENT_ID=<from-google-cloud-console>
 GOOGLE_CLIENT_SECRET=<from-google-cloud-console>
-GMAIL_REDIRECT_URI=http://localhost:8000/auth/callback
+GMAIL_REDIRECT_URI=http://localhost:8000/api/v1/auth/google/callback
+FRONTEND_URL=http://localhost:5173
 
 # ── Microsoft / Outlook (Calendar + Tasks) ────────────────────────────────────
 # Register an app at https://portal.azure.com → App registrations → New registration
@@ -89,6 +90,14 @@ poetry run uvicorn app.main:app --reload --port 8000
 
 The API is now live at **http://localhost:8000**
 Interactive docs at **http://localhost:8000/docs**
+
+For Gmail OAuth locally, make sure your Google Cloud OAuth redirect URI exactly matches:
+
+```text
+http://localhost:8000/api/v1/auth/google/callback
+```
+
+The frontend currently uses hash routing, so the backend must redirect back to the frontend origin and let the SPA land on `#/emails`.
 
 ### Stopping everything
 
@@ -246,6 +255,8 @@ This single call:
 Partial failures (one provider down) are logged and reported per-provider without blocking the others.
 
 > **Note on re-authentication:** The `calendar` and `tasks` Google scopes were added after the initial Gmail integration. Users who connected Gmail earlier need to re-authenticate once (delete `tokens/gmail_user_<id>.json` and run the OAuth flow again).
+
+> **Note on token storage:** Gmail OAuth credentials are currently written to `tokens/gmail_user_<id>.json` on local disk. This works in local development, but ephemeral hosting can lose those files on restart or redeploy. If Gmail keeps disconnecting after deploys, move OAuth credentials to persistent storage.
 
 ---
 

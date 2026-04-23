@@ -69,6 +69,25 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)):
 
     return Token(access_token=access_token, token_type="bearer")
 
+@router.get(
+    "/",
+    response_model=list[UserResponse],
+    summary="List all users",
+    description="Returns every registered user. Requires admin role.",
+)
+def get_all_users(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    """Get all users. Admin only."""
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+    return db.query(User).all()
+
+
 @router.get("/me", response_model=UserResponse)
 def get_current_user_info(current_user: User = Depends(get_current_active_user)):
     """Get the currently authenticated user's information."""

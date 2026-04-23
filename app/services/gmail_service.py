@@ -1,6 +1,7 @@
 import base64
 import glob
 import json
+import logging
 import os
 from typing import Any
 
@@ -20,6 +21,7 @@ SCOPES = [
 ]
 
 TOKENS_DIR = "tokens"
+logger = logging.getLogger(__name__)
 
 
 def get_token_path_for_user(user_id: int) -> str:
@@ -107,6 +109,7 @@ class GmailService:
             self.current_email = data.get("gmail_email") or data.get("client_id") or ""
             return True
         except Exception:
+            logger.exception("Failed to authenticate stored Gmail token for user_id=%s", user_id)
             return False
 
     def authenticate_existing_account(self, email: str) -> bool:
@@ -185,6 +188,7 @@ class GmailService:
                 })
             return email_data
         except Exception:
+            logger.exception("Failed to fetch recent Gmail emails for account=%s", self.current_email or "unknown")
             return []
 
     def fetch_recent_emails_as_inputs(self, n: int = 10) -> list[EmailInput]:

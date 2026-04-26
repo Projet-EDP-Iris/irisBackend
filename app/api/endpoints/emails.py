@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.core.auth import get_current_active_user
 from app.db.database import get_db
 from app.models.email import Email
+from app.ML.classifier import classify_email
 from app.models.user import User
 from app.schemas.detection import ExtractionResult
 from app.schemas.email import EmailItem, FetchAndDetectResponse, FetchDetectPredictResponse
@@ -39,6 +40,7 @@ def _get_emails_for_user(user_id: int, max_results: int = 10) -> list[EmailItem]
             message_id=r["message_id"],
             sender=r.get("sender"),
             date=r.get("date"),
+            category=classify_email(r["subject"], r["body"]),
         )
         for r in raw
     ]
@@ -78,6 +80,7 @@ def post_fetch_and_detect(
             subject=e.subject,
             body=e.body,
             message_id=e.message_id,
+            category=classify_email(e.subject, e.body),
         )
         for e in emails
     ]

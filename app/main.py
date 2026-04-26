@@ -10,6 +10,8 @@ from app.api.endpoints.calendar import router as calendar_router
 from app.api.endpoints.emails import router as email_router
 from app.api.endpoints.prediction import router as prediction_router
 from app.api.endpoints.suggestion import router as suggestion_router
+from app.api.endpoints.email_classifier_router import router as email_router
+from app.api.endpoints.emails import router as email_router
 from app.api.routes.auth_google import router as google_auth_router
 from app.api.routes.auth_microsoft import router as microsoft_auth_router
 from app.api.routes.detection import router as detection_router
@@ -85,6 +87,7 @@ app.include_router(suggestion_router, prefix="/api/v1", tags=["suggestions"])
 app.include_router(calendar_router, prefix="/api/v1", tags=["calendar"])
 app.include_router(google_auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(microsoft_auth_router, prefix="/api/v1", tags=["auth"])
+app.include_router(email_router, prefix="/api/v1", tags=["emails"])
 
 # 6. Fichiers statiques
 if os.path.exists("app/static"):

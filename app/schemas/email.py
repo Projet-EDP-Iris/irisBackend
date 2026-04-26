@@ -11,6 +11,7 @@ class EmailItem(BaseModel):
     message_id: str | None = None
     sender: str | None = None
     date: str | None = None
+    category: str | None = None
 
 
 class FetchAndDetectResponse(BaseModel):

@@ -1,0 +1,130 @@
+"""
+Outlook email reading via Microsoft Graph API.
+
+This module lets Iris fetch emails from a user's Outlook/Microsoft 365 inbox,
+following the same pattern as gmail_service.py but using the Microsoft Graph REST API.
+
+Pre-requisite: the user must have completed the Microsoft OAuth flow
+(GET /api/v1/auth/microsoft) which now requests the Mail.Read scope.
+
+Usage:
+    from app.services.outlook_email_service import fetch_outlook_emails, is_outlook_connected
+
+    if is_outlook_connected(user_id):
+        emails = fetch_outlook_emails(user_id, n=10)
+"""
+import os
+import logging
+
+import httpx
+
+from app.schemas.email import EmailItem
+from app.services.microsoft_oauth_service import TOKENS_DIR, _token_path, get_valid_token
+
+logger = logging.getLogger(__name__)
+
+_GRAPH_BASE = "https://graph.microsoft.com/v1.0"
+
+# Fields we request from the Graph API (minimise payload)
+_SELECT = "id,subject,body,from,receivedDateTime,isRead,isDraft"
+
+
+def is_outlook_connected(user_id: int) -> bool:
+    """Return True if the user has a stored Outlook OAuth token."""
+    return os.path.exists(_token_path(user_id))
+
+
+def _parse_email_item(msg: dict) -> EmailItem:
+    """Convert a Microsoft Graph message object into an EmailItem."""
+    subject = msg.get("subject") or "(Sans objet)"
+
+    # Body — we request plain text via the Prefer header; fall back to HTML content
+    body_obj = msg.get("body") or {}
+    body = body_obj.get("content") or ""
+
+    # Sender
+    from_obj = (msg.get("from") or {}).get("emailAddress", {})
+    sender_name = from_obj.get("name")
+    sender_email = from_obj.get("address")
+    if sender_name and sender_email:
+        sender = f"{sender_name} <{sender_email}>"
+    else:
+        sender = sender_email or sender_name or None
+
+    # Date — Graph returns ISO 8601 with trailing 'Z'
+    date = msg.get("receivedDateTime")
+
+    # Use the Graph message id as our message_id (stable per message)
+    message_id = msg.get("id")
+
+    return EmailItem(
+        subject=subject,
+        body=body,
+        message_id=message_id,
+        sender=sender,
+        date=date,
+    )
+
+
+def fetch_outlook_emails(user_id: int, n: int = 10) -> list[EmailItem]:
+    """
+    Fetch the N most recent non-draft Outlook emails for a user.
+
+    Raises:
+        FileNotFoundError — if the user has not connected Outlook yet.
+        httpx.HTTPStatusError — if the Graph API returns a non-2xx status.
+    """
+    access_token = get_valid_token(user_id)  # auto-refreshes if expired
+
+    url = f"{_GRAPH_BASE}/me/messages"
+    params = {
+        "$select": _SELECT,
+        "$top": str(min(n, 50)),            # Graph API max per page is 1000, but we cap at 50
+        "$orderby": "receivedDateTime desc",
+        "$filter": "isDraft eq false",
+    }
+
+    resp = httpx.get(
+        url,
+        params=params,
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            # Request plain-text body so we don't have to strip HTML
+            "Prefer": 'outlook.body-content-type="text"',
+        },
+        timeout=20,
+    )
+    resp.raise_for_status()
+
+    messages = resp.json().get("value", [])
+    logger.info("Fetched %d Outlook messages for user_id=%d", len(messages), user_id)
+
+    return [_parse_email_item(m) for m in messages]
+
+
+def get_outlook_connection_status(user_id: int) -> dict:
+    """
+    Return connection status for the given user.
+
+    Returns a dict with:
+        connected (bool)   — whether a valid token file exists
+        email (str | None) — the Outlook email address (fetched from /me if connected)
+    """
+    if not is_outlook_connected(user_id):
+        return {"connected": False, "email": None}
+
+    try:
+        access_token = get_valid_token(user_id)
+        resp = httpx.get(
+            f"{_GRAPH_BASE}/me",
+            params={"$select": "mail,userPrincipalName"},
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        profile = resp.json()
+        email = profile.get("mail") or profile.get("userPrincipalName")
+        return {"connected": True, "email": email}
+    except Exception as exc:
+        logger.warning("Could not fetch Outlook profile for user %d: %s", user_id, exc)
+        return {"connected": True, "email": None}

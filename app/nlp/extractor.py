@@ -11,8 +11,14 @@ from app.schemas.detection import (
 )
 
 SCHEDULE_EN = re.compile(
-    r"\b(meeting|schedule|call|appointment|réunion|rendez-vous|planifier|"
-    r"meet|book|slot|availability|available|mardi|mercredi|lundi|jeudi|vendredi)\b",
+    r"\b(meeting|schedule|appointment|réunion|rendez-vous|planifier|"
+    r"entretien|conférence|call\ de|appel|book\ a|slot|availability|"
+    r"fix\ a\ time|trouver\ un\ créneau|créneau|disponibilités?)\b",
+    re.IGNORECASE,
+)
+# Weekday names alone are a weak scheduling signal — checked last, after stronger patterns
+WEEKDAY_RE = re.compile(
+    r"\b(lundi|mardi|mercredi|jeudi|vendredi|monday|tuesday|wednesday|thursday|friday)\b",
     re.IGNORECASE,
 )
 CANCEL_EN = re.compile(
@@ -122,19 +128,33 @@ def _classify_with_spacy(text: str, nlp) -> tuple[str, float]:
 
 
 def _classify(text: str, nlp=None) -> tuple[Classification, float]:
-    # Layer 1: Regex — fast, high-confidence keyword matching
+    # Layer 1: Regex — fast, high-confidence keyword matching.
+    # Order matters: more specific / higher-confidence patterns first.
+    # Cancel / reschedule are unambiguous — always check them first.
     if CANCEL_EN.search(text):
         return "meeting_cancel", 0.9
     if RESCHEDULE_EN.search(text):
         return "meeting_reschedule", 0.85
-    if SCHEDULE_EN.search(text):
-        return "meeting_schedule", 0.8
+
+    # Promotions, action items and follow-ups BEFORE the scheduling check
+    # because a promo email saying "available until Friday" should NOT be
+    # classified as a meeting request.
     if BONSPLANS_RE.search(text):
-        return "bonsplans", 0.75
+        return "bonsplans", 0.8
+    if ACTION_RE.search(text):
+        return "action", 0.75
     if ATTENTE_RE.search(text):
         return "attente", 0.7
-    if ACTION_RE.search(text):
-        return "action", 0.7
+
+    # Strong scheduling keywords (without weekday names — too broad)
+    if SCHEDULE_EN.search(text):
+        return "meeting_schedule", 0.75
+
+    # Weekday names alone: treat as a scheduling signal only when no other
+    # category matched first (low confidence).
+    if WEEKDAY_RE.search(text):
+        return "meeting_schedule", 0.5
+
     # Layer 2: spaCy NER + morphology for remaining emails
     if nlp is not None:
         try:

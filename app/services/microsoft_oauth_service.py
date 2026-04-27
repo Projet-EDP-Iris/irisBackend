@@ -8,6 +8,7 @@ Flow:
   4. get_valid_token() is used by Outlook services to get a fresh access token
 
 Scopes granted:
+  Mail.Read            — read inbox emails (Outlook email fetching)
   Calendars.ReadWrite  — create/update calendar events
   Tasks.ReadWrite      — create tasks in Microsoft To Do
   offline_access       — enables refresh tokens
@@ -24,7 +25,7 @@ import httpx
 from app.core.config import settings
 
 TOKENS_DIR = "tokens"
-_SCOPES = "Calendars.ReadWrite Tasks.ReadWrite offline_access User.Read"
+_SCOPES = "Mail.Read Calendars.ReadWrite Tasks.ReadWrite offline_access User.Read"
 _AUTHORITY = "https://login.microsoftonline.com/{tenant}"
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 

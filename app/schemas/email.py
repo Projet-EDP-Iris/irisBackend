@@ -11,6 +11,8 @@ class EmailItem(BaseModel):
     message_id: str | None = None
     sender: str | None = None
     date: str | None = None
+    category: str = "info"  # UI tab: rdv | action | attente | bonsplans | info
+    db_id: int | None = None  # DB primary key — populated after upsert
 
 
 class FetchAndDetectResponse(BaseModel):

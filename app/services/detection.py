@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.models.feedback import DetectionFeedback
-from app.nlp.extractor import EmailExtractor
+from app.nlp.extractor import EmailExtractor, classification_to_category
 from app.nlp.llm_fallback_openai import LLMFallbackOpenAI
 from app.schemas.detection import (
     EmailInput,
@@ -31,6 +31,15 @@ def _get_llm_fallback() -> LLMFallbackOpenAI:
     if _llm_fallback is None:
         _llm_fallback = LLMFallbackOpenAI()
     return _llm_fallback
+
+
+def categorize_email(email: EmailInput) -> str:
+    """Classify an email using regex + spaCy (no LLM). Returns the UI tab category.
+
+    Used inline in GET /emails for fast, synchronous categorization.
+    """
+    result = _get_extractor().extract(email)
+    return classification_to_category(result.classification)
 
 
 def detect_single(email: EmailInput) -> ExtractionResult:

@@ -19,6 +19,7 @@ import logging
 import httpx
 
 from app.schemas.email import EmailItem
+from app.schemas.detection import EmailInput as DetectionEmailInput
 from app.services.microsoft_oauth_service import TOKENS_DIR, _token_path, get_valid_token
 
 logger = logging.getLogger(__name__)
@@ -57,12 +58,17 @@ def _parse_email_item(msg: dict) -> EmailItem:
     # Use the Graph message id as our message_id (stable per message)
     message_id = msg.get("id")
 
+    # Import here to avoid circular import (detection → extractor, not outlook → detection)
+    from app.services.detection import categorize_email  # noqa: PLC0415
+    category = categorize_email(DetectionEmailInput(subject=subject, body=body))
+
     return EmailItem(
         subject=subject,
         body=body,
         message_id=message_id,
         sender=sender,
         date=date,
+        category=category,
     )
 
 

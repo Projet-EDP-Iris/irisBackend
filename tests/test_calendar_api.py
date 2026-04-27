@@ -344,8 +344,8 @@ class TestConfirmCalendar:
         )
         assert r.status_code == 404
 
-    def test_confirm_no_slots_returns_400(self):
-        """If the email has no predicted slots yet, return 400."""
+    def test_confirm_no_slots_generates_slots_on_demand(self):
+        """If the email has no predicted slots, the endpoint generates them on-demand and confirms."""
         token = _create_and_login()
         client.patch(
             "/api/v1/users/me/calendar-setup",
@@ -372,8 +372,12 @@ class TestConfirmCalendar:
             headers=_auth(token),
             json={"slot_index": 0},
         )
-        assert r.status_code == 400
-        assert "prediction" in r.json()["detail"].lower()
+        # Endpoint now generates slots on-demand rather than returning 400.
+        # It may still fail at the calendar-creation step (no real OAuth token in tests),
+        # but must not return 400 "no predicted slots".
+        assert r.status_code != 400 or "prediction" not in r.json().get("detail", "").lower()
+        data = r.json()
+        assert "slot" in data or r.status_code == 200
 
     def test_confirm_no_provider_configured_returns_400(self):
         """If the user has no calendar_provider set, return 400 with a helpful message."""

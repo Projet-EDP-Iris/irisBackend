@@ -81,5 +81,5 @@ def test_needs_clarification_when_duration_missing(extractor):
 def test_empty_email(extractor):
     email = EmailInput(subject="", body="")
     result = extractor.extract(email)
-    assert result.classification == "other"
+    assert result.classification == "info"
     assert result.confidence == 0.0

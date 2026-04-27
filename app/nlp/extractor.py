@@ -24,6 +24,31 @@ RESCHEDULE_EN = re.compile(
     r"\b(reschedule|move|déplacer|reporter|new time|nouvelle date|change of time)\b",
     re.IGNORECASE,
 )
+BONSPLANS_RE = re.compile(
+    r"\b(promo|promotion|offre\s+sp[eé]ciale|bon\s+plan|r[eé]duction|rabais|soldes?|"
+    r"vente\s+priv[eé]e|flash\s+sale|deal|discount|coupon|code\s+promo|voucher|"
+    r"uber\s*eats|deliveroo|just\s*eat|\d{1,3}\s*%\s*off|\d{1,3}\s*%\s*de\s*r[eé]duction|"
+    r"gratuit|free\s+trial|essai\s+gratuit|limited\s+time|offre\s+limit[eé]e|"
+    r"black\s+friday|cyber\s+monday|prime\s+day)\b",
+    re.IGNORECASE,
+)
+ATTENTE_RE = re.compile(
+    r"\b(follow[- ]?up|relance|en\s+attente\s+de|waiting\s+for\s+your|"
+    r"j.attends\s+(?:votre|ta)|I.m\s+waiting|haven.t\s+heard|toujours\s+en\s+attente|"
+    r"still\s+waiting|awaiting\s+your|pending\s+your|dans\s+l.attente\s+de|"
+    r"avez-vous\s+eu\s+le\s+temps|did\s+you\s+have\s+a\s+chance|any\s+update)\b",
+    re.IGNORECASE,
+)
+ACTION_RE = re.compile(
+    r"\b(action\s+required|action\s+needed|urgent|asap|d[eè]s\s+que\s+possible|"
+    r"merci\s+de\s+(?:bien\s+vouloir|r[eé]pondre|confirmer|valider|envoyer)|"
+    r"please\s+(?:reply|respond|confirm|review|sign|approve|send|fill|complete|provide)|"
+    r"pouvez-vous|pourriez-vous|could\s+you|would\s+you\s+(?:mind|please)|"
+    r"je\s+vous\s+(?:demande|sollicite|prie)|your\s+(?:approval|signature|feedback|input)|"
+    r"deadline|[àa]\s+faire|[àa]\s+valider|[àa]\s+signer|[àa]\s+retourner|"
+    r"r[eé]pondez\s+avant|respond\s+by|due\s+(?:date|by|on))\b",
+    re.IGNORECASE,
+)
 DURATION_RE = re.compile(
     r"(\d+)\s*(?:min(?:ute)?s?|h(?:our)?s?|hrs?)\b",
     re.IGNORECASE,
@@ -69,14 +94,63 @@ def _load_nlp(model_name: str):
         return None
 
 
-def _classify(text: str) -> Classification:
+def _classify_with_spacy(text: str, nlp) -> tuple[str, float]:
+    """Layer 2: spaCy NER + morphology for emails that didn't match any regex."""
+    doc = nlp(text[:600])
+    ent_labels = {ent.label_ for ent in doc.ents}
+    sentences = list(doc.sents)
+
+    has_imperative = any(
+        "Imp" in token.morph.get("Mood", [])
+        for token in doc if token.pos_ == "VERB"
+    )
+    question_ratio = (
+        sum(1 for s in sentences if "?" in s.text) / max(len(sentences), 1)
+    )
+    has_location = "LOC" in ent_labels
+    has_org = "ORG" in ent_labels
+
+    if has_imperative:
+        return "action", 0.6
+    if question_ratio >= 0.3:
+        return "attente", 0.55
+    if has_location:
+        return "rdv", 0.5
+    if has_org and not has_location:
+        return "info", 0.45
+    return "info", 0.3
+
+
+def _classify(text: str, nlp=None) -> tuple[Classification, float]:
+    # Layer 1: Regex — fast, high-confidence keyword matching
     if CANCEL_EN.search(text):
-        return "meeting_cancel"
+        return "meeting_cancel", 0.9
     if RESCHEDULE_EN.search(text):
-        return "meeting_reschedule"
+        return "meeting_reschedule", 0.85
     if SCHEDULE_EN.search(text):
-        return "meeting_schedule"
-    return "other"
+        return "meeting_schedule", 0.8
+    if BONSPLANS_RE.search(text):
+        return "bonsplans", 0.75
+    if ATTENTE_RE.search(text):
+        return "attente", 0.7
+    if ACTION_RE.search(text):
+        return "action", 0.7
+    # Layer 2: spaCy NER + morphology for remaining emails
+    if nlp is not None:
+        try:
+            return _classify_with_spacy(text, nlp)
+        except Exception:
+            pass
+    return "info", 0.3
+
+
+def classification_to_category(classification: str) -> str:
+    """Map NLP Classification value to frontend UI tab ID."""
+    if classification in ("meeting_schedule", "meeting_cancel", "meeting_reschedule"):
+        return "rdv"
+    if classification in ("action", "attente", "bonsplans", "info"):
+        return classification
+    return "info"  # covers "other" and any unknown future value
 
 
 def _extract_times(text: str) -> list[TimeWindow]:
@@ -164,10 +238,15 @@ def _confidence(
     has_duration: bool,
     has_timezone: bool,
     has_link: bool,
+    base_conf: float = 0.0,
 ) -> float:
-    score = 0.0
-    if classification != "other":
+    score = base_conf
+    meeting_types = ("meeting_schedule", "meeting_cancel", "meeting_reschedule")
+    non_meeting_categories = ("action", "attente", "bonsplans")
+    if classification in meeting_types:
         score += 0.3
+    elif classification in non_meeting_categories:
+        score += 0.2
     if has_times:
         score += 0.25
     if has_duration:
@@ -176,7 +255,7 @@ def _confidence(
         score += 0.15
     if has_link:
         score += 0.1
-    if classification == "other" and not (has_times or has_duration):
+    if classification in ("other", "info") and not (has_times or has_duration):
         score = min(score + 0.2, 0.5)
     return min(score + 0.05, 1.0)
 
@@ -195,9 +274,9 @@ class EmailExtractor:
     def extract(self, email: EmailInput) -> ExtractionResult:
         text = f"{email.subject}\n{email.body}".strip()
         if not text:
-            return ExtractionResult(classification="other", confidence=0.0)
+            return ExtractionResult(classification="info", confidence=0.0)
 
-        classification = _classify(text)
+        classification, base_conf = _classify(text, self.nlp)
         proposed_times = _extract_times(text)
         duration_minutes = _extract_duration_minutes(text)
         timezone = _extract_timezone(text)
@@ -218,6 +297,7 @@ class EmailExtractor:
             has_duration=duration_minutes is not None,
             has_timezone=timezone is not None,
             has_link=meeting_link is not None,
+            base_conf=base_conf,
         )
 
         return ExtractionResult(

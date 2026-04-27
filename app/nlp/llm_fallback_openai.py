@@ -60,6 +60,13 @@ class LLMFallbackOpenAI:
                     "schema": {
                         "type": "object",
                         "properties": {
+                            "classification": {
+                                "type": "string",
+                                "enum": [
+                                    "meeting_schedule", "meeting_cancel", "meeting_reschedule",
+                                    "action", "attente", "bonsplans", "info",
+                                ],
+                            },
                             "timezone": {"type": "string"},
                             "duration_minutes": {"type": "integer"},
                             "proposed_times": {
@@ -79,9 +86,13 @@ class LLMFallbackOpenAI:
                 },
             }
             prompt = (
-                "From this email, extract ONLY missing scheduling fields. "
-                "Return a JSON object with only the fields you can fill: timezone, duration_minutes, proposed_times (list of {start, end, timezone}). "
-                "Do not include fields that are already clear or that you cannot infer.\n\n"
+                "From this email, extract ONLY missing or incorrect fields. "
+                "Return a JSON object with only the fields you can fill or correct:\n"
+                "- classification: one of meeting_schedule, meeting_cancel, meeting_reschedule, "
+                "action (requires reader to act), attente (waiting on someone), "
+                "bonsplans (promo/discount), info (newsletter/FYI)\n"
+                "- timezone, duration_minutes, proposed_times (list of {start, end, timezone})\n"
+                "Do not include fields that are already correct or that you cannot infer.\n\n"
                 f"Subject: {email.subject[:200]}\nBody: {email.body[:1500]}"
             )
             resp = self.client.chat.completions.create(

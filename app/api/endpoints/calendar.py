@@ -13,7 +13,7 @@ What happens in one call:
   6. Return a summary of everything that was created
 """
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -90,10 +90,34 @@ def confirm_and_add_to_calendar(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
 
     if not email_record.predicted_slots:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No predicted slots available. Run the prediction step first.",
+        # Run detection + prediction on-demand so confirm works without prior fetch-detect-predict
+        from app.services.detection import detect_single  # noqa: PLC0415
+        from app.services.prediction_service import get_suggested_slots  # noqa: PLC0415
+        from app.schemas.detection import EmailInput  # noqa: PLC0415
+
+        ext = detect_single(EmailInput(
+            subject=email_record.subject or "",
+            body=email_record.body or "",
+        ))
+        slots = get_suggested_slots(ext)
+        if slots:
+            email_record.predicted_slots = [s.model_dump(mode="json") for s in slots]
+            db.flush()
+
+    if not email_record.predicted_slots:
+        # Last-resort fallback: tomorrow at 10:00 UTC for 1 hour
+        t = (
+            datetime.now(timezone.utc)
+            .replace(hour=10, minute=0, second=0, microsecond=0)
+            + timedelta(days=1)
         )
+        email_record.predicted_slots = [{
+            "start_time": t.isoformat(),
+            "end_time": (t + timedelta(hours=1)).isoformat(),
+            "score": 0.5,
+            "label": "default",
+        }]
+        db.flush()
 
     # 2. Pick the requested slot
     slots: list[dict] = email_record.predicted_slots

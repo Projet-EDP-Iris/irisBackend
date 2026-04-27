@@ -12,7 +12,8 @@ from app.models.user import User
 from app.schemas.detection import ExtractionResult
 from app.schemas.email import EmailItem, FetchAndDetectResponse, FetchDetectPredictResponse
 from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
-from app.services.detection import detect_batch
+from app.services.detection import categorize_email, detect_batch
+from app.schemas.detection import EmailInput as DetectionEmailInput
 from app.services.gmail_service import GmailService, get_token_path_for_user
 from app.services.outlook_email_service import (
     fetch_outlook_emails,
@@ -22,6 +23,32 @@ from app.services.prediction_service import get_suggested_slots
 
 router = APIRouter(tags=["emails"])
 logger = logging.getLogger(__name__)
+
+
+def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> None:
+    """Insert or locate each email in the DB and populate db_id on the item."""
+    for item in items:
+        if not item.message_id:
+            continue
+        existing = (
+            db.query(Email)
+            .filter(Email.message_id == item.message_id, Email.user_id == user_id)
+            .first()
+        )
+        if existing:
+            item.db_id = existing.id
+        else:
+            db_email = Email(
+                subject=item.subject,
+                body=item.body,
+                message_id=item.message_id,
+                user_id=user_id,
+                status="fetched",
+            )
+            db.add(db_email)
+            db.flush()
+            item.db_id = db_email.id
+    db.commit()
 
 
 def _get_gmail_emails(user_id: int, max_results: int = 10) -> list[EmailItem]:
@@ -37,6 +64,9 @@ def _get_gmail_emails(user_id: int, max_results: int = 10) -> list[EmailItem]:
             message_id=r["message_id"],
             sender=r.get("sender"),
             date=r.get("date"),
+            category=categorize_email(
+                DetectionEmailInput(subject=r["subject"], body=r["body"])
+            ),
         )
         for r in raw
     ]
@@ -94,6 +124,7 @@ def _get_all_emails_for_user(user_id: int, max_results: int = 10) -> list[EmailI
 def get_emails(
     max_results: int = 10,
     current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
 ) -> list[EmailItem]:
     """
     Fetch recent emails for the authenticated user.
@@ -101,7 +132,9 @@ def get_emails(
     Aggregates from all connected providers (Gmail and/or Outlook).
     Returns HTTP 404 if neither Gmail nor Outlook is connected.
     """
-    return _get_all_emails_for_user(current_user.id, max_results=max_results)
+    items = _get_all_emails_for_user(current_user.id, max_results=max_results)
+    _upsert_email_items(db, current_user.id, items)
+    return items
 
 
 @router.post("/emails/fetch-and-detect", response_model=FetchAndDetectResponse)
@@ -163,19 +196,16 @@ def post_fetch_detect_predict(
     cal = body.calendar if body else None
     suggested_slots = get_suggested_slots(extraction, preferences=prefs, calendar=cal)
 
-    for i, e in enumerate(email_items):
-        db_email = Email(
-            subject=e.subject,
-            body=e.body,
-            message_id=e.message_id,
-            user_id=current_user.id,
-            summary=None,
-            predicted_slots=[s.model_dump(mode="json") for s in suggested_slots] if i == 0 else None,
-            status="predicted"
-        )
-        db.add(db_email)
+    _upsert_email_items(db, current_user.id, email_items)
 
-    db.commit()
+    # Store predicted slots on the first email's DB record
+    if email_items and email_items[0].db_id and suggested_slots:
+        first_record = db.query(Email).filter(Email.id == email_items[0].db_id).first()
+        if first_record:
+            first_record.predicted_slots = [s.model_dump(mode="json") for s in suggested_slots]
+            first_record.status = "predicted"
+            db.commit()
+
     return FetchDetectPredictResponse(
         emails=email_items,
         extractions=extractions,

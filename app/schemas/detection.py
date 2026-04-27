@@ -6,7 +6,11 @@ Classification = Literal[
     "meeting_schedule",
     "meeting_cancel",
     "meeting_reschedule",
-    "other",
+    "action",     # requires reader to do something / reply
+    "attente",    # waiting on someone else's reply/action
+    "bonsplans",  # promos, discount codes, deals
+    "info",       # newsletters, FYI, no action needed
+    "other",      # backwards compat — maps to "info"
 ]
 ThreadStatusLiteral = Literal["pending", "confirmed", "cancelled", "unknown"]
 

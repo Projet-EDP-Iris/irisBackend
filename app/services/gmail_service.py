@@ -1,8 +1,10 @@
 import base64
 import glob
+import html as _html
 import json
 import logging
 import os
+import re as _re
 from typing import Any
 
 from google.auth.transport.requests import Request
@@ -41,8 +43,16 @@ def _decode_body(data: str | None) -> str:
         return ""
 
 
+def _strip_html(raw: str) -> str:
+    """Remove HTML tags and decode entities, returning plain text."""
+    text = _re.sub(r"<(style|script)[^>]*>.*?</\1>", " ", raw, flags=_re.DOTALL | _re.IGNORECASE)
+    text = _re.sub(r"<[^>]+>", " ", text)
+    text = _html.unescape(text)
+    return _re.sub(r"\s+", " ", text).strip()
+
+
 def _extract_body_from_payload(payload: dict[str, Any], snippet_fallback: str = "") -> str:
-    """Extract full body from Gmail message payload (body or parts)."""
+    """Extract plain-text body from Gmail message payload (recursive MIME traversal)."""
     body = payload.get("body", {})
     if body.get("data"):
         return _decode_body(body["data"])
@@ -50,20 +60,30 @@ def _extract_body_from_payload(payload: dict[str, Any], snippet_fallback: str = 
     parts = payload.get("parts") or []
     text_plain: str | None = None
     text_html: str | None = None
+
     for part in parts:
         mime = (part.get("mimeType") or "").lower()
         part_body = part.get("body") or {}
+
+        if mime.startswith("multipart/"):
+            # Recurse into nested containers (e.g. multipart/mixed → multipart/alternative)
+            nested = _extract_body_from_payload(part, "")
+            if nested and text_plain is None:
+                text_plain = nested
+            continue
+
         if not part_body.get("data"):
             continue
         decoded = _decode_body(part_body["data"])
-        if mime == "text/plain":
+        if mime == "text/plain" and text_plain is None:
             text_plain = decoded
         elif mime == "text/html" and text_html is None:
             text_html = decoded
+
     if text_plain:
         return text_plain
     if text_html:
-        return text_html
+        return _strip_html(text_html)
     return snippet_fallback
 
 

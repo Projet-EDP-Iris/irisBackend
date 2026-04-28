@@ -11,17 +11,26 @@ from app.schemas.detection import (
 )
 
 SCHEDULE_EN = re.compile(
-    r"\b(meeting|schedule|call|appointment|réunion|rendez-vous|planifier|"
-    r"meet|book|slot|availability|available|mardi|mercredi|lundi|jeudi|vendredi)\b",
+    r"\b(meeting|appointment|réunion|"
+    r"(?:prendre?|fixer|planifier|notre|votre|un)\s+rendez-vous|"
+    r"rendez-vous\s+(?:le\s+\d|à\s+\d{1,2}[h:]|avec|prévu|confirmé|téléphonique)|"
+    r"schedule\s+a\s+(?:call|meeting|time|sync)|"
+    r"book\s+a\s+(?:call|meeting|slot|time)|"
+    r"hop\s+on\s+a\s+call|let.s\s+meet|meet\s+(?:on|at|up)|"
+    r"call\s+(?:at|on|scheduled|tomorrow|next\s+week)|"
+    r"(?:lundi|mardi|mercredi|jeudi|vendredi)\s+(?:prochain|à\s+\d{1,2}[h:]\d{0,2}|\d{1,2}[h:]\d{0,2}|matin|soir|après-midi|midi)|"
+    r"(?:monday|tuesday|wednesday|thursday|friday)\s+(?:at\s+\d{1,2}|next|morning|afternoon|evening))\b",
     re.IGNORECASE,
 )
 CANCEL_EN = re.compile(
     r"\b(cancel|cancelled|cancellation|annul|annulé|annulation|postpone|reporté|"
-    r"call off|won't happen|ne pourra pas)\b",
+    r"call off|won.t happen|"
+    r"ne pourra pas\s+(?:avoir lieu|se tenir|être maintenu|y participer))\b",
     re.IGNORECASE,
 )
 RESCHEDULE_EN = re.compile(
-    r"\b(reschedule|move|déplacer|reporter|new time|nouvelle date|change of time)\b",
+    r"\b(reschedule|déplacer\s+(?:notre|le|la|un)|reporter\s+(?:notre|le|la|un|à)|"
+    r"new\s+time|nouvelle\s+date|change\s+of\s+time|changer\s+(?:l.heure|la\s+date))\b",
     re.IGNORECASE,
 )
 BONSPLANS_RE = re.compile(
@@ -114,8 +123,6 @@ def _classify_with_spacy(text: str, nlp) -> tuple[str, float]:
         return "action", 0.6
     if question_ratio >= 0.3:
         return "attente", 0.55
-    if has_location:
-        return "rdv", 0.5
     if has_org and not has_location:
         return "info", 0.45
     return "info", 0.3

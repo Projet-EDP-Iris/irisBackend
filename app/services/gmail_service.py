@@ -157,17 +157,108 @@ class GmailService:
         with open(token_path, "w") as f:
             json.dump(data, f, indent=2)
 
-    def fetch_recent_emails(self, n: int = 5) -> list[dict[str, str]]:
-        """Fetch recent emails with full body and message_id. Returns list of dicts with subject, body, message_id, sender, date."""
+    def fetch_email_page(
+        self, page_token: str | None = None, limit: int = 50
+    ) -> tuple[list[dict[str, str]], str | None]:
+        """
+        Fetch one page of emails using a single batch request.
+        Returns (email_list, next_page_token). Each email has subject/sender/date/snippet.
+        """
+        if not self.service:
+            return [], None
+        try:
+            kwargs: dict = {"userId": "me", "maxResults": limit}
+            if page_token:
+                kwargs["pageToken"] = page_token
+            list_result = self.service.users().messages().list(**kwargs).execute()
+            stubs = list_result.get("messages", [])
+            next_token: str | None = list_result.get("nextPageToken")
+            if not stubs:
+                return [], next_token
+
+            results_map: dict = {}
+
+            def _on_response(request_id: str, response: Any, exception: Any) -> None:
+                if exception is None:
+                    results_map[request_id] = response
+
+            batch = self.service.new_batch_http_request(callback=_on_response)
+            for stub in stubs:
+                batch.add(
+                    self.service.users().messages().get(
+                        userId="me",
+                        id=stub["id"],
+                        format="full",
+                        fields="id,snippet,payload/headers",
+                    ),
+                    request_id=stub["id"],
+                )
+            batch.execute()
+
+            email_data: list[dict[str, str]] = []
+            for stub in stubs:
+                msg = results_map.get(stub["id"])
+                if not msg:
+                    continue
+                headers: list[dict[str, Any]] = msg.get("payload", {}).get("headers", [])
+                subject = next((h["value"] for h in headers if h["name"] == "Subject"), "")
+                sender = next((h["value"] for h in headers if h["name"] == "From"), "")
+                date = next((h["value"] for h in headers if h["name"] == "Date"), "")
+                snippet = msg.get("snippet", "")
+                email_data.append({
+                    "subject": subject,
+                    "sender": sender,
+                    "date": date,
+                    "body": snippet,
+                    "message_id": stub["id"],
+                })
+            return email_data, next_token
+        except Exception:
+            logger.exception("Failed to fetch Gmail email page for account=%s", self.current_email or "unknown")
+            return [], None
+
+    def fetch_email_body(self, message_id: str) -> str:
+        """Fetch the full body of a single Gmail email by message_id."""
+        if not self.service:
+            return ""
+        try:
+            msg = self.service.users().messages().get(
+                userId="me", id=message_id, format="full"
+            ).execute()
+            payload = msg.get("payload", {})
+            snippet = msg.get("snippet", "")
+            return _extract_body_from_payload(payload, snippet)
+        except Exception:
+            logger.exception("Failed to fetch Gmail email body for message_id=%s", message_id)
+            return ""
+
+    def fetch_recent_emails(self, n: int | None = None) -> list[dict[str, str]]:
+        """Fetch emails with full body. n=None fetches all (up to Gmail API limits via pagination)."""
         if not self.service:
             raise RuntimeError("Gmail service is not initialized.")
         try:
-            results = self.service.users().messages().list(userId="me", maxResults=n).execute()
-            messages = results.get("messages", [])
-            if not messages:
+            # Collect message stubs via paginated list (Gmail max per page is 500)
+            message_stubs: list[dict] = []
+            page_token: str | None = None
+            while True:
+                kwargs: dict = {"userId": "me", "maxResults": 500}
+                if page_token:
+                    kwargs["pageToken"] = page_token
+                results = self.service.users().messages().list(**kwargs).execute()
+                stubs = results.get("messages", [])
+                message_stubs.extend(stubs)
+                page_token = results.get("nextPageToken")
+                if not page_token or (n is not None and len(message_stubs) >= n):
+                    break
+
+            if n is not None:
+                message_stubs = message_stubs[:n]
+
+            if not message_stubs:
                 return []
+
             email_data = []
-            for message in messages:
+            for message in message_stubs:
                 msg = self.service.users().messages().get(
                     userId="me", id=message["id"], format="full"
                 ).execute()
@@ -188,11 +279,11 @@ class GmailService:
                 })
             return email_data
         except Exception:
-            logger.exception("Failed to fetch recent Gmail emails for account=%s", self.current_email or "unknown")
+            logger.exception("Failed to fetch Gmail emails for account=%s", self.current_email or "unknown")
             return []
 
-    def fetch_recent_emails_as_inputs(self, n: int = 10) -> list[EmailInput]:
-        """Fetch recent emails and return as list[EmailInput] for detection."""
+    def fetch_recent_emails_as_inputs(self, n: int | None = None) -> list[EmailInput]:
+        """Fetch emails and return as list[EmailInput] for detection."""
         raw = self.fetch_recent_emails(n=n)
         return [
             EmailInput(subject=r["subject"], body=r["body"], message_id=r["message_id"])
@@ -200,7 +291,7 @@ class GmailService:
         ]
 
 
-def fetch_recent_emails_as_inputs_for_user(user_id: int, n: int = 10) -> list[EmailInput]:
+def fetch_recent_emails_as_inputs_for_user(user_id: int, n: int | None = None) -> list[EmailInput]:
     """Load token for user_id, fetch recent emails, return list[EmailInput]. Returns [] if no token or fetch fails."""
     svc = GmailService()
     if not svc.authenticate_for_user(user_id):

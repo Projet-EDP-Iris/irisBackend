@@ -40,9 +40,16 @@ PKCE_VERIFIER_TTL_SECONDS = 600
 _CODE_VERIFIER_ALPHABET = ascii_letters + digits + "-._~"
 
 
-def _get_credentials_resolved_path() -> Path:
-    configured_path = Path(settings.GMAIL_CREDENTIALS_PATH).expanduser()
-    return configured_path if configured_path.is_absolute() else Path.cwd() / configured_path
+def _build_client_config() -> dict:
+    return {
+        "web": {
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "redirect_uris": [settings.GMAIL_REDIRECT_URI],
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+        }
+    }
 
 
 def _get_pkce_store_path() -> Path:
@@ -118,16 +125,14 @@ def _generate_code_verifier(length: int = 96) -> str:
 
 
 def get_google_oauth_runtime_diagnostics() -> dict[str, str | bool | None]:
-    resolved_path = _get_credentials_resolved_path()
     pkce_store_path = _get_pkce_store_path()
     settings_source = "environment" if os.getenv("DATABASE_URL") else ".env"
     return {
         "settings_source": settings_source,
         "cwd": str(Path.cwd()),
         "redirect_uri": settings.GMAIL_REDIRECT_URI,
-        "credentials_path": settings.GMAIL_CREDENTIALS_PATH,
-        "credentials_resolved_path": str(resolved_path),
-        "credentials_exists": resolved_path.exists(),
+        "client_id_configured": bool(settings.GOOGLE_CLIENT_ID),
+        "client_secret_configured": bool(settings.GOOGLE_CLIENT_SECRET),
         "pkce_store_path": str(pkce_store_path),
         "pkce_store_exists": pkce_store_path.exists(),
         "secret_key_configured": bool(settings.SECRET_KEY),
@@ -140,12 +145,10 @@ def _ensure_runtime_config() -> None:
             "missing_redirect_uri",
             "GMAIL_REDIRECT_URI is not configured for Google OAuth.",
         )
-
-    resolved_path = _get_credentials_resolved_path()
-    if not resolved_path.exists():
+    if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
         raise GoogleOAuthExchangeError(
-            "missing_credentials_file",
-            f"Gmail OAuth credentials file not found: {resolved_path}",
+            "missing_credentials",
+            "GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET must be set.",
         )
 
 
@@ -176,8 +179,8 @@ def get_auth_url(user_id: int) -> str:
     """Build the Google OAuth consent URL for the given user."""
     _ensure_runtime_config()
     try:
-        flow = Flow.from_client_secrets_file(
-            settings.GMAIL_CREDENTIALS_PATH,
+        flow = Flow.from_client_config(
+            _build_client_config(),
             scopes=SCOPES,
             redirect_uri=settings.GMAIL_REDIRECT_URI,
         )
@@ -216,8 +219,8 @@ def exchange_code_for_token(state: str, code: str) -> int:
     _ensure_runtime_config()
 
     try:
-        flow = Flow.from_client_secrets_file(
-            settings.GMAIL_CREDENTIALS_PATH,
+        flow = Flow.from_client_config(
+            _build_client_config(),
             scopes=SCOPES,
             redirect_uri=settings.GMAIL_REDIRECT_URI,
             state=state,

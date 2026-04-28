@@ -373,11 +373,10 @@ class TestConfirmCalendar:
             json={"slot_index": 0},
         )
         # Endpoint now generates slots on-demand rather than returning 400.
-        # It may still fail at the calendar-creation step (no real OAuth token in tests),
+        # It may fail at the calendar-creation step (no real OAuth token in tests → 502),
         # but must not return 400 "no predicted slots".
-        assert r.status_code != 400 or "prediction" not in r.json().get("detail", "").lower()
-        data = r.json()
-        assert "slot" in data or r.status_code == 200
+        assert r.status_code != 400, f"Got 400: {r.json()}"
+        assert "predicted" not in r.json().get("detail", "").lower()
 
     def test_confirm_no_provider_configured_returns_400(self):
         """If the user has no calendar_provider set, return 400 with a helpful message."""
@@ -402,8 +401,8 @@ class TestConfirmCalendar:
         assert r.status_code == 403
 
     def test_confirm_apple_missing_credentials_returns_error_in_provider(self):
-        """If provider is 'apple' but credentials were never saved, the provider
-        result must contain an error (partial-failure tolerance)."""
+        """If provider is 'apple' but credentials were never saved and it is the only
+        provider, the endpoint returns 502 with the credential error in the detail."""
         token = _create_and_login()
 
         # Manually set providers to ['apple'] without storing credentials
@@ -421,16 +420,12 @@ class TestConfirmCalendar:
             headers=_auth(token),
             json={"slot_index": 0},
         )
-        assert r.status_code == 200
-        providers = r.json()["providers"]
-        assert len(providers) == 1
-        assert providers[0]["provider"] == "apple"
-        assert providers[0]["error"] is not None
-        assert "credentials" in providers[0]["error"].lower()
+        assert r.status_code == 502
+        assert "credentials" in r.json()["detail"].lower()
 
     def test_confirm_google_api_error_reported_in_providers(self):
-        """If the Google Calendar API raises an error, the response still returns 200
-        (partial-failure tolerance) but the provider entry contains the error."""
+        """If the Google Calendar API raises an error and it is the only provider,
+        the endpoint returns 502 with the error message in the detail."""
         token = _create_and_login()
         client.patch(
             "/api/v1/users/me/calendar-setup",
@@ -449,8 +444,5 @@ class TestConfirmCalendar:
                 json={"slot_index": 0},
             )
 
-        assert r.status_code == 200
-        providers = r.json()["providers"]
-        assert len(providers) == 1
-        assert providers[0]["provider"] == "google"
-        assert "quota exceeded" in providers[0]["error"].lower()
+        assert r.status_code == 502
+        assert "quota exceeded" in r.json()["detail"].lower()

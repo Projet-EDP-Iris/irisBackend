@@ -218,6 +218,16 @@ def confirm_and_add_to_calendar(
 
         provider_results.append(result)
 
+    # Check if ALL calendar providers failed — if so, raise an explicit error
+    # (instead of returning 200 silently with all errors inside providers[])
+    calendar_successes = [r for r in provider_results if r.event_id and not r.error]
+    if providers and not calendar_successes:
+        errors = "; ".join(r.error or "unknown error" for r in provider_results)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Échec de création du RDV dans le calendrier : {errors}",
+        )
+
     # 6. Auto-prepare a reply email
     prepared_reply: str | None = None
     try:

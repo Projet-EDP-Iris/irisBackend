@@ -16,6 +16,14 @@ class EmailItem(BaseModel):
     provider: str = "unknown"  # "gmail" | "outlook" | "unknown"
 
 
+class EmailFeedResponse(BaseModel):
+    """Paginated response for GET /emails/feed (infinite scroll)."""
+    emails: list[EmailItem]
+    has_more: bool
+    gmail_next_cursor: str | None = None
+    outlook_next_skip: int = 0
+
+
 class FetchAndDetectResponse(BaseModel):
     emails: list[EmailItem]
     extractions: list[ExtractionResult]

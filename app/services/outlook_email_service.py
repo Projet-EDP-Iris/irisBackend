@@ -121,6 +121,36 @@ def fetch_outlook_emails(user_id: int, n: int | None = None) -> list[EmailItem]:
     return [_parse_email_item(m) for m in all_messages]
 
 
+def fetch_outlook_email_page(
+    user_id: int, skip: int = 0, limit: int = 50
+) -> tuple[list[EmailItem], bool]:
+    """
+    Fetch one page of Outlook emails using $skip offset.
+    Returns (emails, has_more).
+    """
+    access_token = get_valid_token(user_id)
+    resp = httpx.get(
+        f"{_GRAPH_BASE}/me/messages",
+        params={
+            "$select": _SELECT,
+            "$top": str(limit),
+            "$skip": str(skip),
+            "$orderby": "receivedDateTime desc",
+            "$filter": "isDraft eq false",
+        },
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Prefer": 'outlook.body-content-type="text"',
+        },
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    messages = data.get("value", [])
+    has_more = "@odata.nextLink" in data or len(messages) == limit
+    return [_parse_email_item(m) for m in messages], has_more
+
+
 def get_outlook_connection_status(user_id: int) -> dict:
     """
     Return connection status for the given user.

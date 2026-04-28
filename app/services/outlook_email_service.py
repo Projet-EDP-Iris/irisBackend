@@ -69,12 +69,16 @@ def _parse_email_item(msg: dict) -> EmailItem:
         sender=sender,
         date=date,
         category=category,
+        provider="outlook",
     )
 
 
-def fetch_outlook_emails(user_id: int, n: int = 10) -> list[EmailItem]:
+def fetch_outlook_emails(user_id: int, n: int | None = None) -> list[EmailItem]:
     """
-    Fetch the N most recent non-draft Outlook emails for a user.
+    Fetch Outlook emails for a user, paginating through all results.
+
+    Args:
+        n: Maximum number of emails to return. None (default) fetches all.
 
     Raises:
         FileNotFoundError — if the user has not connected Outlook yet.
@@ -82,30 +86,69 @@ def fetch_outlook_emails(user_id: int, n: int = 10) -> list[EmailItem]:
     """
     access_token = get_valid_token(user_id)  # auto-refreshes if expired
 
-    url = f"{_GRAPH_BASE}/me/messages"
-    params = {
+    next_url: str | None = f"{_GRAPH_BASE}/me/messages"
+    params: dict | None = {
         "$select": _SELECT,
-        "$top": str(min(n, 50)),            # Graph API max per page is 1000, but we cap at 50
+        "$top": "1000",  # Graph API max per page
         "$orderby": "receivedDateTime desc",
         "$filter": "isDraft eq false",
     }
 
+    all_messages: list[dict] = []
+    while next_url:
+        resp = httpx.get(
+            next_url,
+            params=params,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Prefer": 'outlook.body-content-type="text"',
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        all_messages.extend(data.get("value", []))
+
+        # nextLink already contains all query params — don't pass params again
+        next_url = data.get("@odata.nextLink")
+        params = None
+
+        if n is not None and len(all_messages) >= n:
+            all_messages = all_messages[:n]
+            break
+
+    logger.info("Fetched %d Outlook messages for user_id=%d", len(all_messages), user_id)
+    return [_parse_email_item(m) for m in all_messages]
+
+
+def fetch_outlook_email_page(
+    user_id: int, skip: int = 0, limit: int = 50
+) -> tuple[list[EmailItem], bool]:
+    """
+    Fetch one page of Outlook emails using $skip offset.
+    Returns (emails, has_more).
+    """
+    access_token = get_valid_token(user_id)
     resp = httpx.get(
-        url,
-        params=params,
+        f"{_GRAPH_BASE}/me/messages",
+        params={
+            "$select": _SELECT,
+            "$top": str(limit),
+            "$skip": str(skip),
+            "$orderby": "receivedDateTime desc",
+            "$filter": "isDraft eq false",
+        },
         headers={
             "Authorization": f"Bearer {access_token}",
-            # Request plain-text body so we don't have to strip HTML
             "Prefer": 'outlook.body-content-type="text"',
         },
-        timeout=20,
+        timeout=30,
     )
     resp.raise_for_status()
-
-    messages = resp.json().get("value", [])
-    logger.info("Fetched %d Outlook messages for user_id=%d", len(messages), user_id)
-
-    return [_parse_email_item(m) for m in messages]
+    data = resp.json()
+    messages = data.get("value", [])
+    has_more = "@odata.nextLink" in data or len(messages) == limit
+    return [_parse_email_item(m) for m in messages], has_more
 
 
 def get_outlook_connection_status(user_id: int) -> dict:

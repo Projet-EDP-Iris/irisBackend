@@ -10,13 +10,14 @@ from app.db.database import get_db
 from app.models.email import Email
 from app.models.user import User
 from app.schemas.detection import ExtractionResult
-from app.schemas.email import EmailItem, FetchAndDetectResponse, FetchDetectPredictResponse
+from app.schemas.email import EmailItem, EmailFeedResponse, FetchAndDetectResponse, FetchDetectPredictResponse
 from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
 from app.services.detection import categorize_email, detect_batch
 from app.schemas.detection import EmailInput as DetectionEmailInput
 from app.services.gmail_service import GmailService, get_token_path_for_user
 from app.services.outlook_email_service import (
     fetch_outlook_emails,
+    fetch_outlook_email_page,
     is_outlook_connected,
 )
 from app.services.prediction_service import get_suggested_slots
@@ -51,7 +52,7 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
     db.commit()
 
 
-def _get_gmail_emails(user_id: int, max_results: int = 10) -> list[EmailItem]:
+def _get_gmail_emails(user_id: int, max_results: int | None = None) -> list[EmailItem]:
     """Fetch emails from Gmail. Returns empty list if not connected or on error."""
     svc = GmailService()
     if not svc.authenticate_for_user(user_id):
@@ -67,12 +68,13 @@ def _get_gmail_emails(user_id: int, max_results: int = 10) -> list[EmailItem]:
             category=categorize_email(
                 DetectionEmailInput(subject=r["subject"], body=r["body"])
             ),
+            provider="gmail",
         )
         for r in raw
     ]
 
 
-def _get_outlook_emails(user_id: int, max_results: int = 10) -> list[EmailItem]:
+def _get_outlook_emails(user_id: int, max_results: int | None = None) -> list[EmailItem]:
     """Fetch emails from Outlook. Returns empty list if not connected or on error."""
     if not is_outlook_connected(user_id):
         return []
@@ -83,12 +85,12 @@ def _get_outlook_emails(user_id: int, max_results: int = 10) -> list[EmailItem]:
         return []
 
 
-def _get_all_emails_for_user(user_id: int, max_results: int = 10) -> list[EmailItem]:
+def _get_all_emails_for_user(user_id: int, max_results: int | None = None) -> list[EmailItem]:
     """
     Merge Gmail and Outlook emails for a user.
     - Returns 404 if neither Gmail nor Outlook is connected.
     - Silently skips a source that fails but returns results from the other.
-    - Returns emails sorted by date (most recent first), capped at max_results.
+    - Returns emails sorted by date (most recent first). max_results=None fetches all.
     """
     gmail_connected = os.path.exists(get_token_path_for_user(user_id))
     outlook_connected = is_outlook_connected(user_id)
@@ -117,12 +119,12 @@ def _get_all_emails_for_user(user_id: int, max_results: int = 10) -> list[EmailI
 
     # Sort by date descending (emails without date go last)
     emails.sort(key=lambda e: e.date or "", reverse=True)
-    return emails[:max_results]
+    return emails if max_results is None else emails[:max_results]
 
 
 @router.get("/emails", response_model=list[EmailItem])
 def get_emails(
-    max_results: int = 10,
+    max_results: int | None = None,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> list[EmailItem]:
@@ -139,7 +141,7 @@ def get_emails(
 
 @router.post("/emails/fetch-and-detect", response_model=FetchAndDetectResponse)
 def post_fetch_and_detect(
-    max_results: int = 10,
+    max_results: int | None = None,
     current_user: User = Depends(get_current_active_user),
 ) -> FetchAndDetectResponse:
     """
@@ -170,7 +172,7 @@ class FetchDetectPredictBody(BaseModel):
 
 @router.post("/emails/fetch-detect-predict", response_model=FetchDetectPredictResponse)
 def post_fetch_detect_predict(
-    max_results: int = 10,
+    max_results: int | None = None,
     body: FetchDetectPredictBody | None = Body(None),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
@@ -212,3 +214,82 @@ def post_fetch_detect_predict(
         suggested_slots=suggested_slots,
         status=PredictionStatus.READY_TO_SCHEDULE,
     )
+
+
+@router.get("/emails/feed", response_model=EmailFeedResponse)
+def get_email_feed(
+    limit: int = 50,
+    gmail_cursor: str | None = None,
+    outlook_skip: int = 0,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> EmailFeedResponse:
+    """
+    Paginated email feed for infinite scroll.
+    Fetches one page from Gmail (batch, metadata + snippet) and one page from Outlook.
+    """
+    from app.schemas.detection import EmailInput as _DetectionInput
+
+    gmail_emails: list[EmailItem] = []
+    gmail_next_cursor: str | None = None
+
+    svc = GmailService()
+    if svc.authenticate_for_user(current_user.id):
+        raw_list, gmail_next_cursor = svc.fetch_email_page(page_token=gmail_cursor, limit=limit)
+        gmail_emails = [
+            EmailItem(
+                subject=r["subject"],
+                body=r["body"],
+                message_id=r["message_id"],
+                sender=r.get("sender"),
+                date=r.get("date"),
+                category=categorize_email(_DetectionInput(subject=r["subject"], body=r["body"])),
+                provider="gmail",
+            )
+            for r in raw_list
+        ]
+
+    outlook_emails: list[EmailItem] = []
+    outlook_has_more = False
+    outlook_next_skip = outlook_skip
+
+    if is_outlook_connected(current_user.id):
+        try:
+            outlook_page, outlook_has_more = fetch_outlook_email_page(
+                current_user.id, skip=outlook_skip, limit=limit
+            )
+            outlook_emails = outlook_page
+            if outlook_has_more:
+                outlook_next_skip = outlook_skip + len(outlook_emails)
+        except Exception as exc:
+            logger.warning("Outlook feed fetch failed for user %d: %s", current_user.id, exc)
+
+    all_emails = gmail_emails + outlook_emails
+    all_emails.sort(key=lambda e: e.date or "", reverse=True)
+
+    has_more = (gmail_next_cursor is not None) or outlook_has_more
+
+    _upsert_email_items(db, current_user.id, all_emails)
+
+    return EmailFeedResponse(
+        emails=all_emails,
+        has_more=has_more,
+        gmail_next_cursor=gmail_next_cursor,
+        outlook_next_skip=outlook_next_skip,
+    )
+
+
+@router.get("/emails/body/{message_id}")
+def get_email_body(
+    message_id: str,
+    provider: str = "gmail",
+    current_user: User = Depends(get_current_active_user),
+) -> dict:
+    """Fetch the full body of a single email. Used when opening a Gmail email from the feed."""
+    if provider == "gmail":
+        svc = GmailService()
+        if not svc.authenticate_for_user(current_user.id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gmail not connected")
+        body = svc.fetch_email_body(message_id)
+        return {"body": body}
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider")

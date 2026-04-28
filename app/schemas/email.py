@@ -13,6 +13,15 @@ class EmailItem(BaseModel):
     date: str | None = None
     category: str = "info"  # UI tab: rdv | action | attente | bonsplans | info
     db_id: int | None = None  # DB primary key — populated after upsert
+    provider: str = "unknown"  # "gmail" | "outlook" | "unknown"
+
+
+class EmailFeedResponse(BaseModel):
+    """Paginated response for GET /emails/feed (infinite scroll)."""
+    emails: list[EmailItem]
+    has_more: bool
+    gmail_next_cursor: str | None = None
+    outlook_next_skip: int = 0
 
 
 class FetchAndDetectResponse(BaseModel):

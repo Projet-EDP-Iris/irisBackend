@@ -26,6 +26,7 @@ from google_auth_oauthlib.flow import Flow
 from googleapiclient.discovery import build
 
 from app.core.config import settings
+from app.db.database import SessionLocal
 from app.services.gmail_service import SCOPES, TOKENS_DIR, GmailService
 
 
@@ -264,4 +265,22 @@ def exchange_code_for_token(state: str, code: str) -> int:
             "token_persist_failed",
             "Google OAuth token could not be saved.",
         ) from exc
+
+    # Auto-register Google as a calendar provider — the OAuth token already
+    # includes the calendar scope, so the user doesn't need a separate setup step.
+    try:
+        from app.models.user import User  # noqa: PLC0415
+        db = SessionLocal()
+        user = db.query(User).filter(User.id == user_id).first()
+        if user:
+            providers: list[str] = list(user.calendar_providers or [])
+            if "google" not in providers:
+                providers.append("google")
+                user.calendar_providers = providers
+            user.calendar_provider = "google"
+            db.commit()
+        db.close()
+    except Exception:
+        pass  # Non-fatal: calendar setup can be done manually via /me/calendar-setup
+
     return user_id

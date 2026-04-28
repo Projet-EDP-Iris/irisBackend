@@ -42,6 +42,9 @@ class ConfirmCalendarRequest(BaseModel):
     # Deprecated — kept for backwards compatibility. Ignored when the user has
     # calendar_providers configured. If calendar_providers is empty, falls back
     # to this single provider value.
+    timezone: str = "UTC"
+    # IANA timezone name from the user's browser (e.g. "Europe/Paris"). Used when
+    # creating calendar events so times are correct in the user's local calendar.
 
 
 class ProviderResult(BaseModel):
@@ -136,13 +139,24 @@ def confirm_and_add_to_calendar(
         # Backwards compatibility: fall back to legacy single provider
         single = body.provider or current_user.calendar_provider
         if not single:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "No calendar provider configured. "
-                    "Call PATCH /api/v1/user/users/me/calendar-setup first."
-                ),
-            )
+            # Auto-detect: if a Google OAuth token exists for this user the Gmail
+            # OAuth already includes the calendar scope, so register Google now
+            # rather than forcing the user through a separate setup step.
+            from app.services.gmail_service import get_token_path_for_user  # noqa: PLC0415
+            import os  # noqa: PLC0415
+            if os.path.exists(get_token_path_for_user(current_user.id)):
+                single = "google"
+                current_user.calendar_providers = ["google"]
+                current_user.calendar_provider = "google"
+                db.flush()
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "No calendar provider configured. "
+                        "Call PATCH /api/v1/user/users/me/calendar-setup first."
+                    ),
+                )
         providers = [single]
 
     # 4. Extract event metadata from detection results
@@ -168,6 +182,7 @@ def confirm_and_add_to_calendar(
                     end_time=end,
                     attendees=attendees,
                     description=description,
+                    timezone=body.timezone,
                 )
             elif provider == "apple":
                 if not current_user.apple_caldav_user or not current_user.apple_caldav_password:
@@ -179,6 +194,7 @@ def confirm_and_add_to_calendar(
                     start_time=start,
                     end_time=end,
                     description=description,
+                    timezone=body.timezone,
                 )
             elif provider == "outlook":
                 result.event_id = create_outlook_calendar_event(
@@ -188,6 +204,7 @@ def confirm_and_add_to_calendar(
                     end_time=end,
                     attendees=attendees,
                     description=description,
+                    timezone=body.timezone,
                 )
             if result.event_id:
                 event_ids[provider] = result.event_id

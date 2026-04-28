@@ -51,7 +51,7 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
     db.commit()
 
 
-def _get_gmail_emails(user_id: int, max_results: int = 10) -> list[EmailItem]:
+def _get_gmail_emails(user_id: int, max_results: int | None = None) -> list[EmailItem]:
     """Fetch emails from Gmail. Returns empty list if not connected or on error."""
     svc = GmailService()
     if not svc.authenticate_for_user(user_id):
@@ -67,12 +67,13 @@ def _get_gmail_emails(user_id: int, max_results: int = 10) -> list[EmailItem]:
             category=categorize_email(
                 DetectionEmailInput(subject=r["subject"], body=r["body"])
             ),
+            provider="gmail",
         )
         for r in raw
     ]
 
 
-def _get_outlook_emails(user_id: int, max_results: int = 10) -> list[EmailItem]:
+def _get_outlook_emails(user_id: int, max_results: int | None = None) -> list[EmailItem]:
     """Fetch emails from Outlook. Returns empty list if not connected or on error."""
     if not is_outlook_connected(user_id):
         return []
@@ -83,12 +84,12 @@ def _get_outlook_emails(user_id: int, max_results: int = 10) -> list[EmailItem]:
         return []
 
 
-def _get_all_emails_for_user(user_id: int, max_results: int = 10) -> list[EmailItem]:
+def _get_all_emails_for_user(user_id: int, max_results: int | None = None) -> list[EmailItem]:
     """
     Merge Gmail and Outlook emails for a user.
     - Returns 404 if neither Gmail nor Outlook is connected.
     - Silently skips a source that fails but returns results from the other.
-    - Returns emails sorted by date (most recent first), capped at max_results.
+    - Returns emails sorted by date (most recent first). max_results=None fetches all.
     """
     gmail_connected = os.path.exists(get_token_path_for_user(user_id))
     outlook_connected = is_outlook_connected(user_id)
@@ -117,12 +118,12 @@ def _get_all_emails_for_user(user_id: int, max_results: int = 10) -> list[EmailI
 
     # Sort by date descending (emails without date go last)
     emails.sort(key=lambda e: e.date or "", reverse=True)
-    return emails[:max_results]
+    return emails if max_results is None else emails[:max_results]
 
 
 @router.get("/emails", response_model=list[EmailItem])
 def get_emails(
-    max_results: int = 10,
+    max_results: int | None = None,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> list[EmailItem]:
@@ -139,7 +140,7 @@ def get_emails(
 
 @router.post("/emails/fetch-and-detect", response_model=FetchAndDetectResponse)
 def post_fetch_and_detect(
-    max_results: int = 10,
+    max_results: int | None = None,
     current_user: User = Depends(get_current_active_user),
 ) -> FetchAndDetectResponse:
     """
@@ -170,7 +171,7 @@ class FetchDetectPredictBody(BaseModel):
 
 @router.post("/emails/fetch-detect-predict", response_model=FetchDetectPredictResponse)
 def post_fetch_detect_predict(
-    max_results: int = 10,
+    max_results: int | None = None,
     body: FetchDetectPredictBody | None = Body(None),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),

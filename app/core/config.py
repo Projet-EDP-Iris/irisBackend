@@ -6,8 +6,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        # Only load .env if DATABASE_URL is not already set in environment
-        env_file=".env" if not os.getenv("DATABASE_URL") else None,
+        env_file=".env",
         case_sensitive=True,
     )
 

@@ -4,7 +4,6 @@ Google OAuth 2.0 endpoints for Gmail + Calendar connection.
   GET /api/v1/auth/google          — returns the Google consent URL (requires Bearer token)
   GET /api/v1/auth/google/callback — exchanges the code, saves token, redirects to frontend
 """
-import json
 import logging
 import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -14,7 +13,6 @@ from fastapi.responses import RedirectResponse
 
 from app.core.auth import get_current_active_user
 from app.models.user import User
-from app.services.gmail_service import get_token_path_for_user
 from app.services.google_oauth_service import (
     GoogleOAuthExchangeError,
     exchange_code_for_token,
@@ -46,18 +44,9 @@ def google_connection_status(
     current_user: User = Depends(get_current_active_user),
 ):
     """Returns whether the authenticated user has saved a Gmail OAuth token."""
-    token_path = get_token_path_for_user(current_user.id)
-    if not os.path.exists(token_path):
+    if not current_user.gmail_oauth_token:
         return {"connected": False, "gmail_email": None}
-    try:
-        with open(token_path) as f:
-            data = json.load(f)
-        return {"connected": True, "gmail_email": data.get("gmail_email")}
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="Stored Gmail connection could not be read. Please reconnect Gmail.",
-        ) from exc
+    return {"connected": True, "gmail_email": current_user.gmail_email}
 
 
 @router.get(

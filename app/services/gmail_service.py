@@ -12,6 +12,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import Resource, build
 
+from app.core.encryption import decrypt, encrypt
 from app.schemas.detection import EmailInput
 
 SCOPES = [
@@ -27,10 +28,37 @@ logger = logging.getLogger(__name__)
 
 
 def get_token_path_for_user(user_id: int) -> str:
-    """Return the token file path for an app user_id (API uses this for fetch)."""
+    """Return the token file path for an app user_id (kept for legacy callers)."""
     if not os.path.exists(TOKENS_DIR):
         os.makedirs(TOKENS_DIR)
     return os.path.join(TOKENS_DIR, f"gmail_user_{user_id}.json")
+
+
+def _save_gmail_token_to_db(user_id: int, token_json_str: str, gmail_email: str) -> None:
+    from app.db.database import SessionLocal
+    from app.models.user import User as UserModel
+    db = SessionLocal()
+    try:
+        user = db.get(UserModel, user_id)
+        if user:
+            user.gmail_oauth_token = encrypt(token_json_str)
+            user.gmail_email = gmail_email
+            db.commit()
+    finally:
+        db.close()
+
+
+def _load_gmail_token_from_db(user_id: int) -> tuple[str, str] | None:
+    from app.db.database import SessionLocal
+    from app.models.user import User as UserModel
+    db = SessionLocal()
+    try:
+        user = db.get(UserModel, user_id)
+        if user and user.gmail_oauth_token:
+            return (decrypt(user.gmail_oauth_token), user.gmail_email or "")
+        return None
+    finally:
+        db.close()
 
 
 def _decode_body(data: str | None) -> str:
@@ -113,20 +141,18 @@ class GmailService:
         return get_token_path_for_user(user_id)
 
     def authenticate_for_user(self, user_id: int) -> bool:
-        """Load token for app user_id, refresh if expired, build Gmail service. Returns True if token exists and is valid."""
-        token_path = get_token_path_for_user(user_id)
-        if not os.path.exists(token_path):
+        """Load token for app user_id from DB, refresh if expired, build Gmail service. Returns True if token exists and is valid."""
+        record = _load_gmail_token_from_db(user_id)
+        if record is None:
             return False
+        token_str, gmail_email = record
         try:
-            self.creds = Credentials.from_authorized_user_file(token_path, SCOPES)
+            self.creds = Credentials.from_authorized_user_info(json.loads(token_str), SCOPES)
             if self.creds and self.creds.expired and self.creds.refresh_token:
                 self.creds.refresh(Request())
-                with open(token_path, "w") as token:
-                    token.write(self.creds.to_json())
+                _save_gmail_token_to_db(user_id, self.creds.to_json(), gmail_email)
             self.service = build("gmail", "v1", credentials=self.creds)
-            with open(token_path) as f:
-                data = json.load(f)
-            self.current_email = data.get("gmail_email") or data.get("client_id") or ""
+            self.current_email = gmail_email
             return True
         except Exception:
             logger.exception("Failed to authenticate stored Gmail token for user_id=%s", user_id)
@@ -169,13 +195,8 @@ class GmailService:
         return email_str
 
     def save_token_for_user(self, user_id: int, creds: Credentials, gmail_email: str | None = None) -> None:
-        """Save token and optional gmail_email for an app user (e.g. from OAuth callback)."""
-        token_path = get_token_path_for_user(user_id)
-        data = json.loads(creds.to_json())
-        if gmail_email:
-            data["gmail_email"] = gmail_email
-        with open(token_path, "w") as f:
-            json.dump(data, f, indent=2)
+        """Save token and optional gmail_email for an app user to the DB."""
+        _save_gmail_token_to_db(user_id, creds.to_json(), gmail_email or "")
 
     def fetch_email_page(
         self, page_token: str | None = None, limit: int = 50

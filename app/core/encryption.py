@@ -1,10 +1,9 @@
-import os
-
 from cryptography.fernet import Fernet, InvalidToken
 
 
 def _get_fernet() -> Fernet:
-    key = os.getenv("SECRET_ENCRYPTION_KEY", "")
+    from app.core.config import settings
+    key = settings.SECRET_ENCRYPTION_KEY or ""
     if not key:
         raise RuntimeError(
             "SECRET_ENCRYPTION_KEY is not set. "

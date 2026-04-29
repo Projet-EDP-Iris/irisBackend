@@ -23,17 +23,43 @@ import time
 import httpx
 
 from app.core.config import settings
+from app.core.encryption import decrypt, encrypt
 
-TOKENS_DIR = "tokens"
 _SCOPES = "Mail.Read Calendars.ReadWrite Tasks.ReadWrite offline_access User.Read"
 _AUTHORITY = "https://login.microsoftonline.com/{tenant}"
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 
 def _token_path(user_id: int) -> str:
-    if not os.path.exists(TOKENS_DIR):
-        os.makedirs(TOKENS_DIR)
-    return os.path.join(TOKENS_DIR, f"outlook_user_{user_id}.json")
+    """Legacy helper — kept so existing imports don't break."""
+    return os.path.join("tokens", f"outlook_user_{user_id}.json")
+
+
+def _save_outlook_token_to_db(user_id: int, token_data: dict) -> None:
+    from app.db.database import SessionLocal
+    from app.models.user import User as UserModel
+    db = SessionLocal()
+    try:
+        user = db.get(UserModel, user_id)
+        if user:
+            user.outlook_oauth_token = encrypt(json.dumps(token_data))
+            user.outlook_email = token_data.get("email") or user.outlook_email
+            db.commit()
+    finally:
+        db.close()
+
+
+def _load_outlook_token_from_db(user_id: int) -> dict | None:
+    from app.db.database import SessionLocal
+    from app.models.user import User as UserModel
+    db = SessionLocal()
+    try:
+        user = db.get(UserModel, user_id)
+        if user and user.outlook_oauth_token:
+            return json.loads(decrypt(user.outlook_oauth_token))
+        return None
+    finally:
+        db.close()
 
 
 def _sign_state(user_id: int) -> str:
@@ -95,8 +121,7 @@ def exchange_code_for_token(state: str, code: str) -> int:
     resp.raise_for_status()
     token_data = resp.json()
     token_data["stored_at"] = time.time()
-    with open(_token_path(user_id), "w") as f:
-        json.dump(token_data, f, indent=2)
+    _save_outlook_token_to_db(user_id, token_data)
     return user_id
 
 
@@ -120,24 +145,21 @@ def _refresh_token(user_id: int, token_data: dict) -> dict:
     # Keep refresh_token if the new response doesn't include one (MS sometimes omits it)
     if "refresh_token" not in new_data:
         new_data["refresh_token"] = token_data["refresh_token"]
-    with open(_token_path(user_id), "w") as f:
-        json.dump(new_data, f, indent=2)
+    _save_outlook_token_to_db(user_id, new_data)
     return new_data
 
 
 def get_valid_token(user_id: int) -> str:
     """
-    Load the stored token for a user, refresh if expired, and return a valid access_token.
+    Load the stored token for a user from DB, refresh if expired, and return a valid access_token.
     Raises FileNotFoundError if the user has not connected Outlook yet.
     """
-    path = _token_path(user_id)
-    if not os.path.exists(path):
+    token_data = _load_outlook_token_from_db(user_id)
+    if token_data is None:
         raise FileNotFoundError(
             f"No Outlook token for user {user_id}. "
             "User must complete the Microsoft OAuth flow via GET /api/v1/auth/microsoft"
         )
-    with open(path) as f:
-        token_data = json.load(f)
 
     stored_at = token_data.get("stored_at", 0)
     expires_in = token_data.get("expires_in", 3600)

@@ -8,11 +8,13 @@ import logging
 import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
 
 from app.core.auth import get_current_active_user
+from app.db.database import get_db
 from app.models.user import User
+from sqlalchemy.orm import Session
 from app.services.google_oauth_service import (
     GoogleOAuthExchangeError,
     exchange_code_for_token,
@@ -120,3 +122,17 @@ def google_oauth_callback(
     background_tasks.add_task(sync_user_emails_background, user_id)
 
     return RedirectResponse(url=_build_frontend_redirect("connected"))
+
+
+@router.delete(
+    "/auth/google",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Disconnect Gmail — removes stored OAuth token",
+)
+def disconnect_google(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    current_user.gmail_oauth_token = None
+    current_user.gmail_email = None
+    db.commit()

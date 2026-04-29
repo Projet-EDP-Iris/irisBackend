@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime as _parsedate
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -23,6 +25,15 @@ from app.services.prediction_service import get_suggested_slots
 
 router = APIRouter(tags=["emails"])
 logger = logging.getLogger(__name__)
+
+
+def _sort_key(date_str: str | None) -> datetime:
+    if not date_str:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    try:
+        return _parsedate(date_str)
+    except Exception:
+        return datetime.min.replace(tzinfo=timezone.utc)
 
 
 def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> None:
@@ -280,13 +291,15 @@ def get_email_feed(
     """
     from app.schemas.detection import EmailInput as _DetectionInput
 
-    # Pre-fetch known message IDs so we can skip NLP for emails already categorised in the DB.
-    # This avoids re-running spaCy on every page refresh (the common case is no new emails).
-    existing_ids: set[str] = {
-        row.message_id
-        for row in db.query(Email.message_id).filter(Email.user_id == current_user.id).all()
+    # Pre-fetch known message IDs + stored categories to skip NLP for already-categorised emails.
+    existing_categories: dict[str, str] = {
+        row.message_id: (row.category or "info")
+        for row in db.query(Email.message_id, Email.category)
+            .filter(Email.user_id == current_user.id)
+            .all()
         if row.message_id
     }
+    existing_ids = set(existing_categories.keys())
 
     gmail_emails: list[EmailItem] = []
     gmail_next_cursor: str | None = None
@@ -301,11 +314,10 @@ def get_email_feed(
                 message_id=r["message_id"],
                 sender=r.get("sender"),
                 date=r.get("date"),
-                # Only run NLP on emails not yet in the DB; existing ones keep their stored category
                 category=(
                     categorize_email(_DetectionInput(subject=r["subject"], body=r["body"]))
                     if r.get("message_id") not in existing_ids
-                    else None
+                    else existing_categories.get(r.get("message_id"), "info")
                 ),
                 provider="gmail",
             )
@@ -328,7 +340,7 @@ def get_email_feed(
             logger.warning("Outlook feed fetch failed for user %d: %s", current_user.id, exc)
 
     all_emails = gmail_emails + outlook_emails
-    all_emails.sort(key=lambda e: e.date or "", reverse=True)
+    all_emails.sort(key=lambda e: _sort_key(e.date), reverse=True)
 
     has_more = (gmail_next_cursor is not None) or outlook_has_more
 

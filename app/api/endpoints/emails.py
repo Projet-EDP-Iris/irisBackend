@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> None:
-    """Insert or locate each email in the DB and populate db_id on the item."""
+    """Insert or update each email in the DB and populate db_id on the item."""
     for item in items:
         if not item.message_id:
             continue
@@ -37,6 +37,15 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
         )
         if existing:
             item.db_id = existing.id
+            # Backfill metadata that may have been missing on first insert
+            if not existing.category and item.category:
+                existing.category = item.category
+            if not existing.email_date and item.date:
+                existing.email_date = item.date
+            if not existing.provider and item.provider and item.provider != "unknown":
+                existing.provider = item.provider
+            if not existing.sender and item.sender:
+                existing.sender = item.sender
         else:
             db_email = Email(
                 subject=item.subject,
@@ -44,6 +53,10 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
                 message_id=item.message_id,
                 user_id=user_id,
                 status="fetched",
+                sender=item.sender,
+                category=item.category,
+                email_date=item.date,
+                provider=item.provider if item.provider != "unknown" else None,
             )
             db.add(db_email)
             db.flush()
@@ -244,6 +257,9 @@ def get_cached_emails(
             message_id=row.message_id,
             sender=row.sender,
             db_id=row.id,
+            category=row.category or "info",
+            date=row.email_date,
+            provider=row.provider or "unknown",
         )
         for row in rows
     ]
@@ -311,6 +327,49 @@ def get_email_feed(
         gmail_next_cursor=gmail_next_cursor,
         outlook_next_skip=outlook_next_skip,
     )
+
+
+def sync_user_emails_background(user_id: int) -> None:
+    """Fetch the first page of emails from all connected providers and persist them.
+    Called as a FastAPI BackgroundTask after OAuth so the DB is populated before
+    the frontend's next /emails/cached or /emails/feed poll."""
+    from app.db.database import SessionLocal  # local import — runs in background thread
+    from app.schemas.detection import EmailInput as _DI
+    db = SessionLocal()
+    try:
+        items: list[EmailItem] = []
+        svc = GmailService()
+        if svc.authenticate_for_user(user_id):
+            try:
+                raw_list, _ = svc.fetch_email_page(page_token=None, limit=50)
+                items.extend([
+                    EmailItem(
+                        subject=r["subject"],
+                        body=r["body"],
+                        message_id=r["message_id"],
+                        sender=r.get("sender"),
+                        date=r.get("date"),
+                        category=categorize_email(_DI(subject=r["subject"], body=r["body"])),
+                        provider="gmail",
+                    )
+                    for r in raw_list
+                ])
+                logger.info("Background sync: fetched %d Gmail emails for user_id=%d", len(raw_list), user_id)
+            except Exception:
+                logger.exception("Background Gmail sync failed for user_id=%d", user_id)
+        if is_outlook_connected(user_id):
+            try:
+                outlook_page, _ = fetch_outlook_email_page(user_id, skip=0, limit=50)
+                items.extend(outlook_page)
+                logger.info("Background sync: fetched %d Outlook emails for user_id=%d", len(outlook_page), user_id)
+            except Exception:
+                logger.exception("Background Outlook sync failed for user_id=%d", user_id)
+        if items:
+            _upsert_email_items(db, user_id, items)
+    except Exception:
+        logger.exception("Background email sync failed for user_id=%d", user_id)
+    finally:
+        db.close()
 
 
 @router.get("/emails/body/{message_id}")

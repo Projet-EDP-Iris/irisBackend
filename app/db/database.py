@@ -42,7 +42,7 @@ def init_db():
     """
     Base.metadata.create_all(bind=engine)
 
-    # Lightweight migration for existing deployments that predate profile_icon.
+    # Lightweight migration for existing deployments that predate these columns.
     with engine.begin() as connection:
         user_columns = {col["name"] for col in inspect(connection).get_columns("users")}
         if "profile_icon" not in user_columns:
@@ -55,3 +55,26 @@ def init_db():
             connection.execute(text("ALTER TABLE users ADD COLUMN outlook_oauth_token TEXT"))
         if "outlook_email" not in user_columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN outlook_email VARCHAR(255)"))
+
+        # Email table columns (added in v2) — keep try/except in case emails
+        # table doesn't exist yet on a brand-new deployment (create_all handles it).
+        try:
+            email_columns = {col["name"] for col in inspect(connection).get_columns("emails")}
+            if "category" not in email_columns:
+                connection.execute(text("ALTER TABLE emails ADD COLUMN category VARCHAR(20)"))
+            if "email_date" not in email_columns:
+                connection.execute(text("ALTER TABLE emails ADD COLUMN email_date VARCHAR(100)"))
+            if "provider" not in email_columns:
+                connection.execute(text("ALTER TABLE emails ADD COLUMN provider VARCHAR(20)"))
+            if "sender" not in email_columns:
+                connection.execute(text("ALTER TABLE emails ADD COLUMN sender VARCHAR(255)"))
+
+            # Migrate from global unique on message_id → composite unique per (message_id, user_id).
+            # Drop the old single-column index (may or may not exist depending on deployment age).
+            connection.execute(text("DROP INDEX IF EXISTS ix_emails_message_id"))
+            connection.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_emails_message_id_user "
+                "ON emails (message_id, user_id)"
+            ))
+        except Exception:
+            pass

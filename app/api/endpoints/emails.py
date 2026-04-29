@@ -280,6 +280,14 @@ def get_email_feed(
     """
     from app.schemas.detection import EmailInput as _DetectionInput
 
+    # Pre-fetch known message IDs so we can skip NLP for emails already categorised in the DB.
+    # This avoids re-running spaCy on every page refresh (the common case is no new emails).
+    existing_ids: set[str] = {
+        row.message_id
+        for row in db.query(Email.message_id).filter(Email.user_id == current_user.id).all()
+        if row.message_id
+    }
+
     gmail_emails: list[EmailItem] = []
     gmail_next_cursor: str | None = None
 
@@ -293,7 +301,12 @@ def get_email_feed(
                 message_id=r["message_id"],
                 sender=r.get("sender"),
                 date=r.get("date"),
-                category=categorize_email(_DetectionInput(subject=r["subject"], body=r["body"])),
+                # Only run NLP on emails not yet in the DB; existing ones keep their stored category
+                category=(
+                    categorize_email(_DetectionInput(subject=r["subject"], body=r["body"]))
+                    if r.get("message_id") not in existing_ids
+                    else None
+                ),
                 provider="gmail",
             )
             for r in raw_list

@@ -142,9 +142,8 @@ def confirm_and_add_to_calendar(
             # Auto-detect: if a Google OAuth token exists for this user the Gmail
             # OAuth already includes the calendar scope, so register Google now
             # rather than forcing the user through a separate setup step.
-            from app.services.gmail_service import get_token_path_for_user  # noqa: PLC0415
-            import os  # noqa: PLC0415
-            if os.path.exists(get_token_path_for_user(current_user.id)):
+            from app.services.gmail_service import _load_gmail_token_from_db  # noqa: PLC0415
+            if _load_gmail_token_from_db(current_user.id) is not None:
                 single = "google"
                 current_user.calendar_providers = ["google"]
                 current_user.calendar_provider = "google"

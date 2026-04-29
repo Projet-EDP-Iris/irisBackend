@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.sql import func
 
 from app.models.base import Base  # Fix: was circular import via app.models
@@ -6,10 +6,13 @@ from app.models.base import Base  # Fix: was circular import via app.models
 
 class Email(Base):
     __tablename__ = "emails"
+    __table_args__ = (
+        UniqueConstraint("message_id", "user_id", name="uq_emails_message_id_user"),
+    )
 
     # Identifiants techniques
     id = Column(Integer, primary_key=True, index=True)
-    message_id = Column(String, unique=True, index=True)
+    message_id = Column(String, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
 
     # Contenu brut de l'email
@@ -30,6 +33,11 @@ class Email(Base):
 
     # Statut pour le suivi du workflow
     status = Column(String, default="pending")
+
+    # Email metadata persisted from provider
+    email_date = Column(String(100), nullable=True)   # Date header value from the email
+    category = Column(String(20), nullable=True)       # UI tab: rdv|action|attente|bonsplans|info
+    provider = Column(String(20), nullable=True)       # "gmail" | "outlook"
 
     # Calendar integration
     calendar_event_id = Column(String, nullable=True)

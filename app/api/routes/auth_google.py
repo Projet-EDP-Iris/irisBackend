@@ -8,7 +8,7 @@ import logging
 import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
 from app.core.auth import get_current_active_user
@@ -87,6 +87,7 @@ def initiate_google_oauth(
     include_in_schema=True,
 )
 def google_oauth_callback(
+    background_tasks: BackgroundTasks,
     code: str = Query(..., description="Authorization code from Google"),
     state: str = Query(..., description="HMAC-signed state containing user_id"),
     error: str | None = Query(default=None),
@@ -100,7 +101,7 @@ def google_oauth_callback(
         return RedirectResponse(url=_build_frontend_redirect("error", reason="provider_error"))
 
     try:
-        exchange_code_for_token(state=state, code=code)
+        user_id = exchange_code_for_token(state=state, code=code)
     except GoogleOAuthExchangeError as exc:
         logger.exception(
             "Google OAuth callback failed reason=%s diagnostics=%s",
@@ -114,5 +115,8 @@ def google_oauth_callback(
             get_google_oauth_runtime_diagnostics(),
         )
         return RedirectResponse(url=_build_frontend_redirect("error", reason="unexpected_callback_error"))
+
+    from app.api.endpoints.emails import sync_user_emails_background
+    background_tasks.add_task(sync_user_emails_background, user_id)
 
     return RedirectResponse(url=_build_frontend_redirect("connected"))

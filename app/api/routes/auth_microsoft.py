@@ -23,7 +23,7 @@ import os
 import logging
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
 from app.core.auth import get_current_active_user
@@ -91,6 +91,7 @@ def microsoft_connection_status(
     summary="Microsoft OAuth callback — exchanges code for token and redirects to frontend",
 )
 def microsoft_oauth_callback(
+    background_tasks: BackgroundTasks,
     code: str | None = Query(default=None),
     state: str | None = Query(default=None),
     error: str | None = Query(default=None),
@@ -114,5 +115,8 @@ def microsoft_oauth_callback(
     except Exception as exc:
         logger.error("Microsoft OAuth token exchange failed: %s", exc)
         return RedirectResponse(url=_build_frontend_redirect("error", "token_exchange_failed"))
+
+    from app.api.endpoints.emails import sync_user_emails_background
+    background_tasks.add_task(sync_user_emails_background, user_id)
 
     return RedirectResponse(url=_build_frontend_redirect("success"))

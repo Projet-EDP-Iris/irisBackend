@@ -1,4 +1,4 @@
-from sqlalchemy import JSON, Boolean, Integer, String
+from sqlalchemy import JSON, Boolean, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TimestampMixin
@@ -27,5 +27,13 @@ class User(Base, TimestampMixin):
     # Apple ID email address (e.g. dan@icloud.com)
     apple_caldav_password: Mapped[str | None] = mapped_column(String(500), nullable=True)
     # App Password from appleid.apple.com — stored Fernet-encrypted
+
+    # Gmail OAuth — stored Fernet-encrypted
+    gmail_oauth_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gmail_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Outlook OAuth — stored Fernet-encrypted
+    outlook_oauth_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outlook_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
 

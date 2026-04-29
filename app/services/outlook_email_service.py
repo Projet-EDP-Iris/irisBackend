@@ -13,14 +13,13 @@ Usage:
     if is_outlook_connected(user_id):
         emails = fetch_outlook_emails(user_id, n=10)
 """
-import os
 import logging
 
 import httpx
 
 from app.schemas.email import EmailItem
 from app.schemas.detection import EmailInput as DetectionEmailInput
-from app.services.microsoft_oauth_service import TOKENS_DIR, _token_path, get_valid_token
+from app.services.microsoft_oauth_service import _load_outlook_token_from_db, get_valid_token
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +30,8 @@ _SELECT = "id,subject,body,from,receivedDateTime,isRead,isDraft"
 
 
 def is_outlook_connected(user_id: int) -> bool:
-    """Return True if the user has a stored Outlook OAuth token."""
-    return os.path.exists(_token_path(user_id))
+    """Return True if the user has a stored Outlook OAuth token in the DB."""
+    return _load_outlook_token_from_db(user_id) is not None
 
 
 def _parse_email_item(msg: dict) -> EmailItem:

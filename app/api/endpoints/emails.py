@@ -1,7 +1,6 @@
-import os
 import logging
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -14,7 +13,7 @@ from app.schemas.email import EmailItem, EmailFeedResponse, FetchAndDetectRespon
 from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
 from app.services.detection import categorize_email, detect_batch
 from app.schemas.detection import EmailInput as DetectionEmailInput
-from app.services.gmail_service import GmailService, get_token_path_for_user
+from app.services.gmail_service import GmailService
 from app.services.outlook_email_service import (
     fetch_outlook_emails,
     fetch_outlook_email_page,
@@ -92,7 +91,8 @@ def _get_all_emails_for_user(user_id: int, max_results: int | None = None) -> li
     - Silently skips a source that fails but returns results from the other.
     - Returns emails sorted by date (most recent first). max_results=None fetches all.
     """
-    gmail_connected = os.path.exists(get_token_path_for_user(user_id))
+    from app.services.gmail_service import _load_gmail_token_from_db
+    gmail_connected = _load_gmail_token_from_db(user_id) is not None
     outlook_connected = is_outlook_connected(user_id)
 
     if not gmail_connected and not outlook_connected:
@@ -214,6 +214,40 @@ def post_fetch_detect_predict(
         suggested_slots=suggested_slots,
         status=PredictionStatus.READY_TO_SCHEDULE,
     )
+
+
+@router.get("/emails/cached", response_model=EmailFeedResponse)
+def get_cached_emails(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> EmailFeedResponse:
+    """
+    Return emails already stored in the DB for this user — no external API calls.
+    Used for instant first-paint before the background /emails/feed refresh completes.
+    """
+    rows = (
+        db.query(Email)
+        .filter(Email.user_id == current_user.id)
+        .order_by(Email.received_at.desc())
+        .offset(offset)
+        .limit(limit + 1)
+        .all()
+    )
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+    items = [
+        EmailItem(
+            subject=row.subject or "",
+            body=row.body or "",
+            message_id=row.message_id,
+            sender=row.sender,
+            db_id=row.id,
+        )
+        for row in rows
+    ]
+    return EmailFeedResponse(emails=items, has_more=has_more)
 
 
 @router.get("/emails/feed", response_model=EmailFeedResponse)

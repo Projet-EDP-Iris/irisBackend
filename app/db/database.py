@@ -20,7 +20,7 @@ if _db_url.startswith("sqlite"):
         future=True
     )
 else:
-    engine = create_engine(_db_url, future=True, pool_pre_ping=True)
+    engine = create_engine(_db_url, future=True, pool_pre_ping=True, pool_recycle=300)
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 
@@ -47,3 +47,11 @@ def init_db():
         user_columns = {col["name"] for col in inspect(connection).get_columns("users")}
         if "profile_icon" not in user_columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN profile_icon VARCHAR(50)"))
+        if "gmail_oauth_token" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN gmail_oauth_token TEXT"))
+        if "gmail_email" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN gmail_email VARCHAR(255)"))
+        if "outlook_oauth_token" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN outlook_oauth_token TEXT"))
+        if "outlook_email" not in user_columns:
+            connection.execute(text("ALTER TABLE users ADD COLUMN outlook_email VARCHAR(255)"))

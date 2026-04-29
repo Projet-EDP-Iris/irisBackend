@@ -75,6 +75,13 @@ app.add_middleware(
 @app.on_event("startup")
 def startup_event():
     init_db()
+    # Pre-warm the spaCy NLP model so the first /emails/feed request doesn't pay
+    # the 10-30s cold-start cost of loading the model under live traffic.
+    try:
+        from app.services.detection import _get_extractor
+        _get_extractor()
+    except Exception:
+        pass  # Never block startup if model loading fails
 
 # 5. Inclusion des Routes
 app.include_router(user_router, prefix="/api/v1", tags=["users"])

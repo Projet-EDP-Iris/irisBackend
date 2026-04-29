@@ -15,6 +15,7 @@ def create_apple_calendar_event(
     start_time: datetime,
     end_time: datetime,
     description: str | None = None,
+    timezone: str = "UTC",
 ) -> str:
     """
     Creates an event on the user's primary iCloud Calendar via CalDAV.

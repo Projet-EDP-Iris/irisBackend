@@ -23,7 +23,7 @@ def test_exchange_code_for_token_classifies_state_failures(_mock_verify):
 @patch("app.services.google_oauth_service._ensure_runtime_config")
 @patch("app.services.google_oauth_service._consume_code_verifier", return_value="stored-verifier")
 @patch("app.services.google_oauth_service._verify_state", return_value=(1, "nonce-123"))
-@patch("app.services.google_oauth_service.Flow.from_client_secrets_file")
+@patch("app.services.google_oauth_service.Flow.from_client_config")
 def test_exchange_code_for_token_classifies_token_exchange_failures(
     mock_flow_factory,
     _mock_verify,
@@ -44,7 +44,7 @@ def test_exchange_code_for_token_classifies_token_exchange_failures(
 @patch("app.services.google_oauth_service._consume_code_verifier", return_value="stored-verifier")
 @patch("app.services.google_oauth_service._verify_state", return_value=(1, "nonce-123"))
 @patch("app.services.google_oauth_service.build")
-@patch("app.services.google_oauth_service.Flow.from_client_secrets_file")
+@patch("app.services.google_oauth_service.Flow.from_client_config")
 def test_exchange_code_for_token_classifies_userinfo_failures(
     mock_flow_factory,
     mock_build,
@@ -71,7 +71,7 @@ def test_exchange_code_for_token_classifies_userinfo_failures(
 @patch("app.services.google_oauth_service._verify_state", return_value=(1, "nonce-123"))
 @patch("app.services.google_oauth_service.GmailService")
 @patch("app.services.google_oauth_service.build")
-@patch("app.services.google_oauth_service.Flow.from_client_secrets_file")
+@patch("app.services.google_oauth_service.Flow.from_client_config")
 def test_exchange_code_for_token_classifies_token_persist_failures(
     mock_flow_factory,
     mock_build,
@@ -100,7 +100,7 @@ def test_exchange_code_for_token_classifies_token_persist_failures(
 @patch("app.services.google_oauth_service._generate_code_verifier", return_value="verifier-123")
 @patch("app.services.google_oauth_service._generate_state_nonce", return_value="nonce-123")
 @patch("app.services.google_oauth_service._store_code_verifier")
-@patch("app.services.google_oauth_service.Flow.from_client_secrets_file")
+@patch("app.services.google_oauth_service.Flow.from_client_config")
 def test_get_auth_url_stores_code_verifier_by_nonce(
     mock_flow_factory,
     mock_store_verifier,
@@ -135,7 +135,7 @@ def test_store_and_consume_code_verifier_round_trip(tmp_path):
 @patch("app.services.google_oauth_service._ensure_runtime_config")
 @patch("app.services.google_oauth_service._consume_code_verifier", return_value=None)
 @patch("app.services.google_oauth_service._verify_state", return_value=(1, "missing-nonce"))
-@patch("app.services.google_oauth_service.Flow.from_client_secrets_file")
+@patch("app.services.google_oauth_service.Flow.from_client_config")
 def test_exchange_code_for_token_classifies_missing_pkce_verifier(
     mock_flow_factory,
     _mock_verify,
@@ -155,7 +155,7 @@ def test_exchange_code_for_token_classifies_missing_pkce_verifier(
 @patch("app.services.google_oauth_service._verify_state", return_value=(1, "nonce-123"))
 @patch("app.services.google_oauth_service.GmailService")
 @patch("app.services.google_oauth_service.build")
-@patch("app.services.google_oauth_service.Flow.from_client_secrets_file")
+@patch("app.services.google_oauth_service.Flow.from_client_config")
 def test_exchange_code_for_token_uses_stored_pkce_verifier(
     mock_flow_factory,
     mock_build,

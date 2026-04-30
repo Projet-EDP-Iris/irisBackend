@@ -129,19 +129,21 @@ def _classify_with_spacy(text: str, nlp) -> tuple[str, float]:
 
 
 def _classify(text: str, nlp=None) -> tuple[Classification, float]:
-    # Layer 1: Regex — fast, high-confidence keyword matching
+    # Layer 1: Regex — fast, high-confidence keyword matching.
+    # Order matters: cancel/reschedule first (unambiguous), then BONSPLANS/ACTION/ATTENTE
+    # BEFORE scheduling, to avoid promos or follow-ups being mis-tagged as RDV.
     if CANCEL_EN.search(text):
         return "meeting_cancel", 0.9
     if RESCHEDULE_EN.search(text):
         return "meeting_reschedule", 0.85
-    if SCHEDULE_EN.search(text):
-        return "meeting_schedule", 0.8
     if BONSPLANS_RE.search(text):
-        return "bonsplans", 0.75
+        return "bonsplans", 0.8
+    if ACTION_RE.search(text):
+        return "action", 0.75
     if ATTENTE_RE.search(text):
         return "attente", 0.7
-    if ACTION_RE.search(text):
-        return "action", 0.7
+    if SCHEDULE_EN.search(text):
+        return "meeting_schedule", 0.75
     # Layer 2: spaCy NER + morphology for remaining emails
     if nlp is not None:
         try:

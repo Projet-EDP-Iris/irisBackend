@@ -16,10 +16,24 @@ SCHEDULE_EN = re.compile(
     r"rendez-vous\s+(?:le\s+\d|à\s+\d{1,2}[h:]|avec|prévu|confirmé|téléphonique)|"
     r"schedule\s+a\s+(?:call|meeting|time|sync)|"
     r"book\s+a\s+(?:call|meeting|slot|time)|"
-    r"hop\s+on\s+a\s+call|let.s\s+meet|meet\s+(?:on|at|up)|"
+    r"set\s+up\s+a\s+(?:call|meeting|time|sync)|find\s+a\s+time|"
+    r"hop\s+on\s+a\s+(?:call|zoom|teams|meet)|let.s\s+(?:meet|chat|sync|catch\s+up)|"
+    r"meet\s+(?:on|at|up)|catch[\s-]?up|"
     r"call\s+(?:at|on|scheduled|tomorrow|next\s+week)|"
+    r"quick\s+(?:call|chat|sync)|petit\s+(?:appel|point|call)|call\s+rapide|"
+    r"on\s+se\s+retrouve|faire\s+(?:un|le)\s+point|point\s+de\s+(?:situation|suivi)|"
+    r"sync(?:hronisation)?|convocation|invitation\s+(?:à\s+la\s+)?réunion|"
+    r"coffee\s+chat|virtual\s+coffee|grab\s+a\s+coffee|"
     r"(?:lundi|mardi|mercredi|jeudi|vendredi)\s+(?:prochain|à\s+\d{1,2}[h:]\d{0,2}|\d{1,2}[h:]\d{0,2}|matin|soir|après-midi|midi)|"
-    r"(?:monday|tuesday|wednesday|thursday|friday)\s+(?:at\s+\d{1,2}|next|morning|afternoon|evening))\b",
+    r"(?:monday|tuesday|wednesday|thursday|friday)\s+(?:at\s+\d{1,2}|next|morning|afternoon|evening)|"
+    r"dispo\s+(?:lundi|mardi|mercredi|jeudi|vendredi|ce\s+soir|demain|la\s+semaine)|"
+    r"tu\s+es\s+(?:dispo|libre|disponible)|"
+    r"vous\s+êtes\s+(?:dispo|libre|disponible)|"
+    r"on\s+se\s+voit\s+(?:quand|demain|lundi|mardi|mercredi|jeudi|vendredi)|"
+    r"ça\s+te\s+va\s+(?:lundi|mardi|mercredi|jeudi|vendredi|pour|demain)|"
+    r"libre\s+(?:lundi|mardi|mercredi|jeudi|vendredi|demain|ce\s+soir)|"
+    r"are\s+you\s+(?:free|available)\s+(?:on|this|next)|"
+    r"(?:free|available)\s+(?:monday|tuesday|wednesday|thursday|friday|tomorrow))\b",
     re.IGNORECASE,
 )
 CANCEL_EN = re.compile(
@@ -34,18 +48,25 @@ RESCHEDULE_EN = re.compile(
     re.IGNORECASE,
 )
 BONSPLANS_RE = re.compile(
-    r"\b(promo|promotion|offre\s+sp[eé]ciale|bon\s+plan|r[eé]duction|rabais|soldes?|"
+    r"\b(promo|promotion|offre\s+sp[eé]ciale|offre\s+exclusive|bon\s+plan|r[eé]duction|rabais|soldes?|"
     r"vente\s+priv[eé]e|flash\s+sale|deal|discount|coupon|code\s+promo|voucher|"
     r"uber\s*eats|deliveroo|just\s*eat|\d{1,3}\s*%\s*off|\d{1,3}\s*%\s*de\s*r[eé]duction|"
+    r"jusqu.[àa]\s+\d{1,3}\s*%|[eé]conomisez|cashback|livraison\s+offerte|"
     r"gratuit|free\s+trial|essai\s+gratuit|limited\s+time|offre\s+limit[eé]e|"
-    r"black\s+friday|cyber\s+monday|prime\s+day)\b",
+    r"valable\s+jusqu|points?\s+fid[eé]lit[eé]|membres?\s+exclusifs?|r[eé]compenses?|"
+    r"save\s+\d+|special\s+offer|exclusive\s+offer|"
+    r"black\s+friday|cyber\s+monday|prime\s+day|nos\s+offres)\b",
     re.IGNORECASE,
 )
 ATTENTE_RE = re.compile(
     r"\b(follow[- ]?up|relance|en\s+attente\s+de|waiting\s+for\s+your|"
     r"j.attends\s+(?:votre|ta)|I.m\s+waiting|haven.t\s+heard|toujours\s+en\s+attente|"
     r"still\s+waiting|awaiting\s+your|pending\s+your|dans\s+l.attente\s+de|"
-    r"avez-vous\s+eu\s+le\s+temps|did\s+you\s+have\s+a\s+chance|any\s+update)\b",
+    r"avez-vous\s+eu\s+le\s+temps|did\s+you\s+have\s+a\s+chance|any\s+update|"
+    r"sans\s+nouvelles?\s+de|juste\s+pour\s+v[eé]rifier|tu\s+as\s+vu\s+mon|"
+    r"est-ce\s+que\s+tu\s+peux\s+confirmer|me\s+permets?\s+de\s+(?:te\s+)?relancer|"
+    r"un\s+petit\s+rappel|reminder|pas\s+encore\s+re[cç]u|sans\s+r[eé]ponse|"
+    r"not\s+yet\s+received|just\s+a\s+reminder|checking\s+in)\b",
     re.IGNORECASE,
 )
 ACTION_RE = re.compile(
@@ -54,8 +75,24 @@ ACTION_RE = re.compile(
     r"please\s+(?:reply|respond|confirm|review|sign|approve|send|fill|complete|provide)|"
     r"pouvez-vous|pourriez-vous|could\s+you|would\s+you\s+(?:mind|please)|"
     r"je\s+vous\s+(?:demande|sollicite|prie)|your\s+(?:approval|signature|feedback|input)|"
-    r"deadline|[àa]\s+faire|[àa]\s+valider|[àa]\s+signer|[àa]\s+retourner|"
-    r"r[eé]pondez\s+avant|respond\s+by|due\s+(?:date|by|on))\b",
+    r"deadline|[àa]\s+faire|[àa]\s+valider|[àa]\s+signer|[àa]\s+retourner|[àa]\s+compl[eé]ter|"
+    r"r[eé]pondez\s+avant|respond\s+by|due\s+(?:date|by|on)|"
+    r"formulaire\s+[àa]\s+remplir|veuillez\s+(?:remplir|confirmer|valider|signer|envoyer|noter)|"
+    r"n.oubliez\s+pas\s+de|action\s+de\s+(?:ta|votre)\s+part|"
+    r"besoin\s+de\s+(?:ta|votre)\s+r[eé]ponse|update\s+required|must\s+be\s+(?:done|completed)|"
+    r"document\s+[àa]\s+signer|avant\s+le\s+\d)\b",
+    re.IGNORECASE,
+)
+INFO_RE = re.compile(
+    r"\b(newsletter|bulletin\s+(?:d.information|mensuel|hebdomadaire)|"
+    r"rapport\s+(?:mensuel|hebdomadaire|annuel|de\s+suivi|d.activit[eé])|"
+    r"compte[\s-]rendu|r[eé]sum[eé]\s+(?:de\s+la\s+semaine|du\s+mois|de\s+r[eé]union)|"
+    r"mise\s+[àa]\s+jour\s+(?:du\s+projet|de\s+la\s+situation)|note\s+interne|"
+    r"pour\s+(?:votre\s+)?information|FYI|for\s+your\s+(?:information|records)|"
+    r"ci-joint\s+(?:le|la|les|notre|votre)|veuillez\s+trouver\s+ci-joint|"
+    r"digest\s+(?:de|du)|weekly\s+(?:digest|update|summary)|monthly\s+(?:report|summary)|"
+    r"no\s+action\s+(?:required|needed)|aucune\s+action\s+(?:requise|n[eé]cessaire)|"
+    r"à\s+titre\s+d.information)\b",
     re.IGNORECASE,
 )
 DURATION_RE = re.compile(
@@ -142,6 +179,8 @@ def _classify(text: str, nlp=None) -> tuple[Classification, float]:
         return "attente", 0.7
     if ACTION_RE.search(text):
         return "action", 0.7
+    if INFO_RE.search(text):
+        return "info", 0.65
     # Layer 2: spaCy NER + morphology for remaining emails
     if nlp is not None:
         try:
@@ -284,8 +323,9 @@ class EmailExtractor:
             return ExtractionResult(classification="info", confidence=0.0)
 
         classification, base_conf = _classify(text, self.nlp)
-        proposed_times = _extract_times(text)
-        duration_minutes = _extract_duration_minutes(text)
+        _meeting_types = ("meeting_schedule", "meeting_cancel", "meeting_reschedule")
+        proposed_times = _extract_times(text) if classification in _meeting_types else []
+        duration_minutes = _extract_duration_minutes(text) if classification in _meeting_types else None
         timezone = _extract_timezone(text)
         meeting_link, link_platform = _extract_meeting_link(text)
         modality = _extract_modality(text, link_platform)

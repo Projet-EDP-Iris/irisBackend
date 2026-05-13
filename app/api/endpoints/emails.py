@@ -65,9 +65,6 @@ def _get_gmail_emails(user_id: int, max_results: int | None = None) -> list[Emai
             message_id=r["message_id"],
             sender=r.get("sender"),
             date=r.get("date"),
-            category=categorize_email(
-                DetectionEmailInput(subject=r["subject"], body=r["body"])
-            ),
             provider="gmail",
         )
         for r in raw
@@ -134,7 +131,16 @@ def get_emails(
     Aggregates from all connected providers (Gmail and/or Outlook).
     Returns HTTP 404 if neither Gmail nor Outlook is connected.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
     items = _get_all_emails_for_user(current_user.id, max_results=max_results)
+    if items:
+        with ThreadPoolExecutor(max_workers=min(8, len(items))) as executor:
+            futures = {
+                executor.submit(categorize_email, DetectionEmailInput(subject=it.subject, body=it.body)): i
+                for i, it in enumerate(items)
+            }
+            for future in _as_completed(futures):
+                items[futures[future]].category = future.result()
     _upsert_email_items(db, current_user.id, items)
     return items
 
@@ -234,7 +240,12 @@ def get_email_feed(
     gmail_next_cursor: str | None = None
 
     svc = GmailService()
-    if svc.authenticate_for_user(current_user.id):
+    try:
+        gmail_ok = svc.authenticate_for_user(current_user.id)
+    except Exception as exc:
+        logger.warning("Gmail auth failed for user %d: %s", current_user.id, exc)
+        gmail_ok = False
+    if gmail_ok:
         raw_list, gmail_next_cursor = svc.fetch_email_page(page_token=gmail_cursor, limit=limit)
         gmail_emails = [
             EmailItem(
@@ -243,7 +254,6 @@ def get_email_feed(
                 message_id=r["message_id"],
                 sender=r.get("sender"),
                 date=r.get("date"),
-                category=categorize_email(_DetectionInput(subject=r["subject"], body=r["body"])),
                 provider="gmail",
             )
             for r in raw_list
@@ -266,6 +276,21 @@ def get_email_feed(
 
     all_emails = gmail_emails + outlook_emails
     all_emails.sort(key=lambda e: e.date or "", reverse=True)
+
+    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+    if all_emails:
+        with ThreadPoolExecutor(max_workers=min(8, len(all_emails))) as executor:
+            futures = {
+                executor.submit(categorize_email, _DetectionInput(subject=it.subject, body=it.body)): i
+                for i, it in enumerate(all_emails)
+            }
+            for future in _as_completed(futures):
+                idx = futures[future]
+                try:
+                    all_emails[idx].category = future.result()
+                except Exception as exc:
+                    logger.warning("categorize_email failed for email %d: %s", idx, exc)
+                    all_emails[idx].category = "info"
 
     has_more = (gmail_next_cursor is not None) or outlook_has_more
 

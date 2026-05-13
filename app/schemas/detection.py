@@ -73,6 +73,7 @@ class ExtractionResult(BaseModel):
     constraints: list[Constraint] = []
     thread_status: ThreadStatusLiteral = "unknown"
     needs_clarification: bool = False
+    needs_review: bool = False
     confidence: float = 0.0
 
 

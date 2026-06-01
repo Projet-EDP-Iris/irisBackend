@@ -64,12 +64,25 @@ def reset_db():
 # Helpers
 # ─────────────────────────────────────────────
 
+def _verify_user(email: str) -> None:
+    """Mark user as email-verified directly in test DB."""
+    db = TestSession()
+    try:
+        user = db.query(User).filter_by(email=email).first()
+        if user:
+            user.is_email_verified = True
+            db.commit()
+    finally:
+        db.close()
+
+
 def _create_and_login():
     """Create a test user and return their Bearer token."""
     client.post(
         "/api/v1/users/",
         json={"email": USER_EMAIL, "password": USER_PASSWORD, "role": "regular"},
     )
+    _verify_user(USER_EMAIL)
     r = client.post(
         "/api/v1/users/login",
         json={"email": USER_EMAIL, "password": USER_PASSWORD},

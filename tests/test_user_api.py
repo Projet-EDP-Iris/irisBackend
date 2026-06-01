@@ -6,6 +6,7 @@ from sqlalchemy.orm import sessionmaker
 from app.db.database import get_db
 from app.main import app
 from app.models.base import Base
+from app.models.user import User
 
 # Create a test database engine (in-memory SQLite)
 TEST_DATABASE_URL = "sqlite:///./test.db"
@@ -40,6 +41,30 @@ def setup_database():
     yield
     Base.metadata.drop_all(bind=test_engine)
 
+
+def _verify_user(email: str) -> None:
+    """Directly mark a user's email as verified in the test DB."""
+    db = TestSessionLocal()
+    try:
+        user = db.query(User).filter_by(email=email).first()
+        if user:
+            user.is_email_verified = True
+            db.commit()
+    finally:
+        db.close()
+
+
+def _create_verified_user(email: str, password: str, role: str = "regular"):
+    """Create a user via the API and immediately mark their email as verified."""
+    resp = client.post(
+        f"{BASE}/",
+        json={"email": email, "password": password, "role": role},
+    )
+    if resp.status_code == 201:
+        _verify_user(email)
+    return resp
+
+
 def test_create_user_api():
     """Test creating a new user account"""
     response = client.post(
@@ -57,6 +82,8 @@ def test_create_user_api():
     assert "id" in data
     assert "password" not in data
     assert "password_hash" not in data
+    assert data["is_email_verified"] is False
+
 
 def test_create_user_duplicate_email():
     """Test that duplicate email returns 400"""
@@ -96,17 +123,8 @@ def test_create_user_weak_password():
 
 def test_login_success():
     """Test successful login returns JWT token"""
-    # Create user
-    client.post(
-        f"{BASE}/",
-        json={
-            "email": TEST_USER_EMAIL,
-            "password": TEST_USER_PASSWORD,
-            "role": "regular"
-        }
-    )
+    _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
 
-    # Login
     response = client.post(
         f"{BASE}/login",
         json={
@@ -120,9 +138,8 @@ def test_login_success():
     assert data["token_type"] == "bearer"
     assert len(data["access_token"]) > 0
 
-def test_login_wrong_password():
-    """Test login with wrong password returns 401"""
-    # Create user
+def test_login_unverified_user():
+    """Test that login is blocked for unverified users"""
     client.post(
         f"{BASE}/",
         json={
@@ -131,8 +148,22 @@ def test_login_wrong_password():
             "role": "regular"
         }
     )
+    # Do NOT verify email
 
-    # Try to login with wrong password
+    response = client.post(
+        f"{BASE}/login",
+        json={
+            "email": TEST_USER_EMAIL,
+            "password": TEST_USER_PASSWORD
+        }
+    )
+    assert response.status_code == 403
+    assert "verified" in response.json()["detail"].lower()
+
+def test_login_wrong_password():
+    """Test login with wrong password returns 401"""
+    _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
+
     response = client.post(
         f"{BASE}/login",
         json={
@@ -156,15 +187,7 @@ def test_login_nonexistent_user():
 
 def test_get_current_user():
     """Test getting current user info with valid token"""
-    # Create and login
-    client.post(
-        f"{BASE}/",
-        json={
-            "email": TEST_USER_EMAIL,
-            "password": TEST_USER_PASSWORD,
-            "role": "regular"
-        }
-    )
+    _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
 
     login_response = client.post(
         f"{BASE}/login",
@@ -175,7 +198,6 @@ def test_get_current_user():
     )
     token = login_response.json()["access_token"]
 
-    # Get current user
     response = client.get(
         f"{BASE}/me",
         headers={"Authorization": f"Bearer {token}"}
@@ -200,18 +222,9 @@ def test_get_current_user_invalid_token():
 
 def test_get_user_by_id():
     """Test getting a specific user by ID"""
-    # Create user
-    create_response = client.post(
-        f"{BASE}/",
-        json={
-            "email": TEST_USER_EMAIL,
-            "password": TEST_USER_PASSWORD,
-            "role": "regular"
-        }
-    )
+    create_response = _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
     user_id = create_response.json()["id"]
 
-    # Login
     login_response = client.post(
         f"{BASE}/login",
         json={
@@ -221,7 +234,6 @@ def test_get_user_by_id():
     )
     token = login_response.json()["access_token"]
 
-    # Get user by ID
     response = client.get(
         f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"}
@@ -233,15 +245,7 @@ def test_get_user_by_id():
 
 def test_get_user_not_found():
     """Test getting non-existent user returns 404"""
-    # Create and login
-    client.post(
-        f"{BASE}/",
-        json={
-            "email": TEST_USER_EMAIL,
-            "password": TEST_USER_PASSWORD,
-            "role": "regular"
-        }
-    )
+    _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
 
     login_response = client.post(
         f"{BASE}/login",
@@ -252,7 +256,6 @@ def test_get_user_not_found():
     )
     token = login_response.json()["access_token"]
 
-    # Try to get non-existent user
     response = client.get(
         f"{BASE}/99999",
         headers={"Authorization": f"Bearer {token}"}
@@ -261,15 +264,7 @@ def test_get_user_not_found():
 
 def test_update_own_user():
     """Test user can update their own information"""
-    # Create and login
-    create_response = client.post(
-        f"{BASE}/",
-        json={
-            "email": TEST_USER_EMAIL,
-            "password": TEST_USER_PASSWORD,
-            "role": "regular"
-        }
-    )
+    create_response = _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
     user_id = create_response.json()["id"]
 
     login_response = client.post(
@@ -281,7 +276,6 @@ def test_update_own_user():
     )
     token = login_response.json()["access_token"]
 
-    # Update email
     response = client.patch(
         f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"},
@@ -292,16 +286,8 @@ def test_update_own_user():
     assert data["email"] == "newemail@example.com"
 
 def test_update_user_password():
-    """Test user can update their password"""
-    # Create and login
-    create_response = client.post(
-        f"{BASE}/",
-        json={
-            "email": TEST_USER_EMAIL,
-            "password": TEST_USER_PASSWORD,
-            "role": "regular"
-        }
-    )
+    """Test user can update their password via PATCH /{user_id}"""
+    create_response = _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
     user_id = create_response.json()["id"]
 
     login_response = client.post(
@@ -313,7 +299,6 @@ def test_update_user_password():
     )
     token = login_response.json()["access_token"]
 
-    # Update password
     new_password = "NewPass123!"
     response = client.patch(
         f"{BASE}/{user_id}",
@@ -334,18 +319,8 @@ def test_update_user_password():
 
 def test_update_other_user_forbidden():
     """Test regular user cannot update another user"""
-    # Create two users
-    user1_response = client.post(
-        f"{BASE}/",
-        json={
-            "email": "user1@example.com",
-            "password": "Pass1234!",
-            "role": "regular"
-        }
-    )
-    _ = user1_response.json()["id"]  # noqa: F841
-
-    user2_response = client.post(
+    _create_verified_user("user1@example.com", "Pass1234!")
+    client.post(
         f"{BASE}/",
         json={
             "email": "user2@example.com",
@@ -353,9 +328,14 @@ def test_update_other_user_forbidden():
             "role": "regular"
         }
     )
-    user2_id = user2_response.json()["id"]
+    user2_id = (
+        TestSessionLocal()
+        .query(User)
+        .filter_by(email="user2@example.com")
+        .first()
+        .id
+    )
 
-    # Login as user1
     login_response = client.post(
         f"{BASE}/login",
         json={
@@ -365,7 +345,6 @@ def test_update_other_user_forbidden():
     )
     token = login_response.json()["access_token"]
 
-    # Try to update user2
     response = client.patch(
         f"{BASE}/{user2_id}",
         headers={"Authorization": f"Bearer {token}"},
@@ -375,7 +354,6 @@ def test_update_other_user_forbidden():
 
 def test_admin_can_update_other_user():
     """Test admin can update other users"""
-    # Create regular user
     user_response = client.post(
         f"{BASE}/",
         json={
@@ -386,17 +364,8 @@ def test_admin_can_update_other_user():
     )
     user_id = user_response.json()["id"]
 
-    # Create admin
-    client.post(
-        f"{BASE}/",
-        json={
-            "email": TEST_ADMIN_EMAIL,
-            "password": TEST_ADMIN_PASSWORD,
-            "role": "admin"
-        }
-    )
+    _create_verified_user(TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD, role="admin")
 
-    # Login as admin
     login_response = client.post(
         f"{BASE}/login",
         json={
@@ -406,7 +375,6 @@ def test_admin_can_update_other_user():
     )
     token = login_response.json()["access_token"]
 
-    # Update regular user
     response = client.patch(
         f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"},
@@ -417,15 +385,7 @@ def test_admin_can_update_other_user():
 
 def test_delete_own_user():
     """Test user can delete their own account"""
-    # Create and login
-    create_response = client.post(
-        f"{BASE}/",
-        json={
-            "email": TEST_USER_EMAIL,
-            "password": TEST_USER_PASSWORD,
-            "role": "regular"
-        }
-    )
+    create_response = _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
     user_id = create_response.json()["id"]
 
     login_response = client.post(
@@ -437,14 +397,13 @@ def test_delete_own_user():
     )
     token = login_response.json()["access_token"]
 
-    # Delete account
     response = client.delete(
         f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 204
 
-    # Verify user is deleted
+    # Verify user is deleted (token now invalid)
     get_response = client.get(
         f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"}
@@ -453,16 +412,7 @@ def test_delete_own_user():
 
 def test_delete_other_user_forbidden():
     """Test regular user cannot delete another user"""
-    # Create two users
-    _ = client.post(  # noqa: F841
-        f"{BASE}/",
-        json={
-            "email": "user1@example.com",
-            "password": "Pass1234!",
-            "role": "regular"
-        }
-    )
-
+    _create_verified_user("user1@example.com", "Pass1234!")
     user2_response = client.post(
         f"{BASE}/",
         json={
@@ -473,7 +423,6 @@ def test_delete_other_user_forbidden():
     )
     user2_id = user2_response.json()["id"]
 
-    # Login as user1
     login_response = client.post(
         f"{BASE}/login",
         json={
@@ -483,7 +432,6 @@ def test_delete_other_user_forbidden():
     )
     token = login_response.json()["access_token"]
 
-    # Try to delete user2
     response = client.delete(
         f"{BASE}/{user2_id}",
         headers={"Authorization": f"Bearer {token}"}
@@ -492,7 +440,6 @@ def test_delete_other_user_forbidden():
 
 def test_admin_can_delete_other_user():
     """Test admin can delete other users"""
-    # Create regular user
     user_response = client.post(
         f"{BASE}/",
         json={
@@ -503,17 +450,8 @@ def test_admin_can_delete_other_user():
     )
     user_id = user_response.json()["id"]
 
-    # Create admin
-    client.post(
-        f"{BASE}/",
-        json={
-            "email": TEST_ADMIN_EMAIL,
-            "password": TEST_ADMIN_PASSWORD,
-            "role": "admin"
-        }
-    )
+    _create_verified_user(TEST_ADMIN_EMAIL, TEST_ADMIN_PASSWORD, role="admin")
 
-    # Login as admin
     login_response = client.post(
         f"{BASE}/login",
         json={
@@ -523,7 +461,6 @@ def test_admin_can_delete_other_user():
     )
     token = login_response.json()["access_token"]
 
-    # Delete regular user
     response = client.delete(
         f"{BASE}/{user_id}",
         headers={"Authorization": f"Bearer {token}"}

@@ -44,5 +44,21 @@ class Settings(BaseSettings):
     # "common" allows any Microsoft/Outlook account; set a specific tenant ID for org-only
     MICROSOFT_REDIRECT_URI: str = Field(default="http://localhost:8000/api/v1/auth/microsoft/callback")
 
+    # Frontend URL — used in email links
+    FRONTEND_URL: str = Field(default="http://localhost:5173")
+
+    # Email (SMTP) — set EMAIL_ENABLED=true and configure SMTP to send real emails
+    EMAIL_ENABLED: bool = Field(default=False)
+    SMTP_HOST: str = Field(default="smtp.gmail.com")
+    SMTP_PORT: int = Field(default=587)
+    SMTP_USE_TLS: bool = Field(default=True)
+    SMTP_USERNAME: str | None = Field(default=None)
+    SMTP_PASSWORD: str | None = Field(default=None)
+    SMTP_FROM_EMAIL: str = Field(default="noreply@iris-app.com")
+
+    # Token expiry
+    PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = Field(default=30)
+    EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = Field(default=24)
+
 settings = Settings()
 

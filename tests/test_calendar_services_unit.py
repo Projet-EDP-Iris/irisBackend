@@ -19,6 +19,11 @@ from cryptography.fernet import Fernet
 _TEST_KEY = Fernet.generate_key().decode()
 os.environ.setdefault("SECRET_ENCRYPTION_KEY", _TEST_KEY)
 
+# Ensure settings has the key even if Settings() was already instantiated before this module.
+from app.core.config import settings as _settings  # noqa: E402
+
+_settings.SECRET_ENCRYPTION_KEY = _TEST_KEY
+
 TEST_APPLE_USER = "apple-calendar-user@example.test"
 TEST_APPLE_CALDAV_PASSWORD = "TEST_APPLE_CALDAV_VALUE_123"
 TEST_DECRYPTION_PLAINTEXT = "TEST_DECRYPTED_PASSWORD_VALUE"
@@ -42,27 +47,18 @@ class TestGoogleCalendarService:
         creds.to_json.return_value = '{"token": "refreshed"}'
         return creds
 
-    def test_creates_event_and_returns_id(self, tmp_path):
-        """
-        Happy path: valid token on disk → Google API called with correct
-        arguments → event ID returned.
-        """
-        # Write a fake token file so _load_creds_for_user finds it
-        token_file = tmp_path / "gmail_user_1.json"
-        token_file.write_text('{"token": "fake"}')
-
+    def test_creates_event_and_returns_id(self):
+        """Happy path: valid token in DB → Google API called → event ID returned."""
         fake_event = {"id": "google_event_abc123"}
+        mock_creds = self._mock_creds()
 
         with (
-            patch("app.services.google_calendar_service.get_token_path_for_user",
-                  return_value=str(token_file)),
-            patch("app.services.google_calendar_service.Credentials.from_authorized_user_file",
-                  return_value=self._mock_creds()),
+            patch("app.services.google_calendar_service._load_creds_for_user",
+                  return_value=mock_creds),
             patch("app.services.google_calendar_service.build") as mock_build,
         ):
             mock_service = MagicMock()
             mock_build.return_value = mock_service
-            # Chain: service.events().insert(...).execute() → fake_event
             mock_service.events.return_value.insert.return_value.execute.return_value = fake_event
 
             from app.services.google_calendar_service import create_google_calendar_event
@@ -76,21 +72,14 @@ class TestGoogleCalendarService:
             )
 
         assert event_id == "google_event_abc123"
-
-        # Verify the API was called with calendarId="primary" and sendUpdates="all"
         insert_call = mock_service.events.return_value.insert.call_args
         assert insert_call.kwargs["calendarId"] == "primary"
         assert insert_call.kwargs["sendUpdates"] == "all"
 
-    def test_attendees_are_included_in_event_body(self, tmp_path):
+    def test_attendees_are_included_in_event_body(self):
         """Attendee emails must be formatted as [{'email': ...}] for the Google API."""
-        token_file = tmp_path / "gmail_user_2.json"
-        token_file.write_text('{"token": "fake"}')
-
         with (
-            patch("app.services.google_calendar_service.get_token_path_for_user",
-                  return_value=str(token_file)),
-            patch("app.services.google_calendar_service.Credentials.from_authorized_user_file",
+            patch("app.services.google_calendar_service._load_creds_for_user",
                   return_value=self._mock_creds()),
             patch("app.services.google_calendar_service.build") as mock_build,
         ):
@@ -110,10 +99,10 @@ class TestGoogleCalendarService:
         body = mock_service.events.return_value.insert.call_args.kwargs["body"]
         assert body["attendees"] == [{"email": "a@x.com"}, {"email": "b@x.com"}]
 
-    def test_raises_when_no_token_file(self, tmp_path):
-        """If the user has no OAuth token on disk, FileNotFoundError is raised."""
-        with patch("app.services.google_calendar_service.get_token_path_for_user",
-                   return_value=str(tmp_path / "nonexistent.json")):
+    def test_raises_when_no_token_file(self):
+        """If the user has no OAuth token in DB, FileNotFoundError is raised."""
+        with patch("app.services.google_calendar_service._load_creds_for_user",
+                   side_effect=FileNotFoundError("No OAuth token for user 99")):
             from app.services.google_calendar_service import create_google_calendar_event
             with pytest.raises(FileNotFoundError, match="No OAuth token"):
                 create_google_calendar_event(
@@ -123,19 +112,19 @@ class TestGoogleCalendarService:
                     end_time=self.END,
                 )
 
-    def test_refreshes_expired_credentials(self, tmp_path):
+    def test_refreshes_expired_credentials(self):
         """Expired credentials should be refreshed before calling the API."""
-        token_file = tmp_path / "gmail_user_3.json"
-        token_file.write_text('{"token": "old"}')
-
+        import json as _json
+        token_data = _json.dumps({"token": "old", "refresh_token": "refresh"})
         expired_creds = self._mock_creds(valid=True, expired=True)
 
         with (
-            patch("app.services.google_calendar_service.get_token_path_for_user",
-                  return_value=str(token_file)),
-            patch("app.services.google_calendar_service.Credentials.from_authorized_user_file",
+            patch("app.services.google_calendar_service._load_gmail_token_from_db",
+                  return_value=(token_data, "user@gmail.com")),
+            patch("app.services.google_calendar_service.Credentials.from_authorized_user_info",
                   return_value=expired_creds),
             patch("app.services.google_calendar_service.Request"),
+            patch("app.services.gmail_service._save_gmail_token_to_db"),
             patch("app.services.google_calendar_service.build") as mock_build,
         ):
             mock_service = MagicMock()
@@ -147,7 +136,6 @@ class TestGoogleCalendarService:
                 user_id=3, summary="X", start_time=self.START, end_time=self.END
             )
 
-        # refresh() must have been called on the credentials object
         expired_creds.refresh.assert_called_once()
 
 

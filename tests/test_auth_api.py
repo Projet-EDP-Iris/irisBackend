@@ -197,7 +197,6 @@ class TestResetPassword:
         data = _register_user()
         client.post(f"{AUTH_BASE}/forgot-password", json={"email": TEST_EMAIL})
         _expire_token(data["id"], TokenType.password_reset)
-        token_str = _get_token_from_db.__wrapped__ if hasattr(_get_token_from_db, "__wrapped__") else None
         # Read directly since token is now expired (consume_token returns None)
         db = TestSessionLocal()
         try:

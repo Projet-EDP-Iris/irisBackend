@@ -8,7 +8,6 @@ from app.db.database import get_db
 from app.main import app
 from app.models.base import Base
 from app.models.email import Email  # registers Email table
-from app.models.user import User   # registers User table
 
 TEST_DATABASE_URL = "sqlite:///./test_suggestion.db"
 test_engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})

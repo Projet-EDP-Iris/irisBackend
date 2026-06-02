@@ -13,7 +13,7 @@ What happens in one call:
   6. Return a summary of everything that was created
 """
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -94,9 +94,9 @@ def confirm_and_add_to_calendar(
 
     if not email_record.predicted_slots:
         # Run detection + prediction on-demand so confirm works without prior fetch-detect-predict
+        from app.schemas.detection import EmailInput  # noqa: PLC0415
         from app.services.detection import detect_single  # noqa: PLC0415
         from app.services.prediction_service import get_suggested_slots  # noqa: PLC0415
-        from app.schemas.detection import EmailInput  # noqa: PLC0415
 
         ext = detect_single(EmailInput(
             subject=email_record.subject or "",
@@ -110,7 +110,7 @@ def confirm_and_add_to_calendar(
     if not email_record.predicted_slots:
         # Last-resort fallback: tomorrow at 10:00 UTC for 1 hour
         t = (
-            datetime.now(timezone.utc)
+            datetime.now(UTC)
             .replace(hour=10, minute=0, second=0, microsecond=0)
             + timedelta(days=1)
         )

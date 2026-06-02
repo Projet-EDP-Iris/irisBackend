@@ -1,11 +1,8 @@
 import base64
-import json
-import os
 from unittest.mock import MagicMock, patch
 
 from app.schemas.detection import EmailInput
 from app.services.gmail_service import (
-    TOKENS_DIR,
     GmailService,
     _decode_body,
     _extract_body_from_payload,
@@ -151,22 +148,20 @@ def test_fetch_recent_emails_as_inputs_returns_email_inputs():
     assert result[0].message_id == "mid1"
 
 
-def test_fetch_recent_emails_as_inputs_for_user_no_token_returns_empty(tmp_path):
-    with patch("app.services.gmail_service.get_token_path_for_user") as mock_path:
-        mock_path.return_value = str(tmp_path / "nonexistent.json")
+def test_fetch_recent_emails_as_inputs_for_user_no_token_returns_empty():
+    with patch("app.services.gmail_service._load_gmail_token_from_db", return_value=None):
         result = fetch_recent_emails_as_inputs_for_user(999, n=5)
     assert result == []
 
 
 def test_authenticate_for_user_returns_false_when_no_file():
     svc = GmailService()
-    with patch("app.services.gmail_service.get_token_path_for_user") as mock_path:
-        mock_path.return_value = os.path.join(TOKENS_DIR, "gmail_user_99999_nonexist.json")
+    with patch("app.services.gmail_service._load_gmail_token_from_db", return_value=None):
         assert svc.authenticate_for_user(99999) is False
 
 
-def test_authenticate_for_user_returns_true_when_token_exists(tmp_path):
-    token_path = tmp_path / "gmail_user_1.json"
+def test_authenticate_for_user_returns_true_when_token_exists():
+    import json as _json
     token_data = {
         "token": "fake_access",
         "refresh_token": "fake_refresh",
@@ -174,15 +169,15 @@ def test_authenticate_for_user_returns_true_when_token_exists(tmp_path):
         "client_id": "cid",
         "client_secret": "csec",
         "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
-        "gmail_email": "user@gmail.com",
     }
-    token_path.write_text(json.dumps(token_data))
-    with patch("app.services.gmail_service.get_token_path_for_user", return_value=str(token_path)):
+    with patch("app.services.gmail_service._load_gmail_token_from_db",
+               return_value=(_json.dumps(token_data), "user@gmail.com")):
         with patch("app.services.gmail_service.Credentials") as mock_creds:
             mock_cred_instance = MagicMock()
             mock_cred_instance.expired = False
             mock_cred_instance.refresh_token = None
-            mock_creds.from_authorized_user_file.return_value = mock_cred_instance
+            mock_cred_instance.valid = True
+            mock_creds.from_authorized_user_info.return_value = mock_cred_instance
             with patch("app.services.gmail_service.build") as _mock_build:
                 svc = GmailService()
                 result = svc.authenticate_for_user(1)

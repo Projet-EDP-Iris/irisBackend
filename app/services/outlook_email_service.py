@@ -17,8 +17,8 @@ import logging
 
 import httpx
 
-from app.schemas.email import EmailItem
 from app.schemas.detection import EmailInput as DetectionEmailInput
+from app.schemas.email import EmailItem
 from app.services.microsoft_oauth_service import _load_outlook_token_from_db, get_valid_token
 
 logger = logging.getLogger(__name__)

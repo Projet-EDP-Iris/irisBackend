@@ -89,7 +89,7 @@ def _prune_expired_pkce_store(
         nonce: entry
         for nonce, entry in store.items()
         if isinstance(entry, dict)
-        and isinstance(entry.get("expires_at"), (int, float))
+        and isinstance(entry.get("expires_at"), (int, float))  # noqa: UP038
         and float(entry["expires_at"]) > current_time
         and isinstance(entry.get("code_verifier"), str)
     }

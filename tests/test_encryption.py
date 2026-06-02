@@ -13,7 +13,11 @@ from cryptography.fernet import Fernet
 _TEST_KEY = Fernet.generate_key().decode()
 os.environ.setdefault("SECRET_ENCRYPTION_KEY", _TEST_KEY)
 
+from app.core.config import settings  # noqa: E402
 from app.core.encryption import decrypt, encrypt  # noqa: E402
+
+# Ensure settings has the key even if Settings() was created before this module loaded.
+settings.SECRET_ENCRYPTION_KEY = _TEST_KEY
 
 TEST_SECRET_VALUE = "TEST_ENCRYPTION_VALUE_123"
 TEST_REPEAT_VALUE = "TEST_REPEATABLE_INPUT_VALUE"
@@ -56,14 +60,8 @@ def test_decrypt_raises_on_empty_string():
 
 def test_encrypt_raises_when_key_missing(monkeypatch):
     """If SECRET_ENCRYPTION_KEY is unset, encrypt() must raise RuntimeError."""
-    monkeypatch.delenv("SECRET_ENCRYPTION_KEY", raising=False)
-    # Re-import to bypass the module-level cached key
-    import importlib
-
-    import app.core.encryption as enc_module
-    importlib.reload(enc_module)
+    from app.core.config import settings
+    from app.core.encryption import encrypt as enc_fn
+    monkeypatch.setattr(settings, "SECRET_ENCRYPTION_KEY", None)
     with pytest.raises(RuntimeError, match="SECRET_ENCRYPTION_KEY"):
-        enc_module.encrypt("anything")
-    # Restore so other tests are unaffected
-    os.environ["SECRET_ENCRYPTION_KEY"] = _TEST_KEY
-    importlib.reload(enc_module)
+        enc_fn("anything")

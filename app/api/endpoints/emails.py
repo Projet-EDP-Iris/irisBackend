@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime as _parsedate
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
@@ -10,15 +10,20 @@ from app.core.auth import get_current_active_user
 from app.db.database import get_db
 from app.models.email import Email
 from app.models.user import User
+from app.schemas.detection import EmailInput as DetectionEmailInput
 from app.schemas.detection import ExtractionResult
-from app.schemas.email import EmailItem, EmailFeedResponse, FetchAndDetectResponse, FetchDetectPredictResponse
+from app.schemas.email import (
+    EmailFeedResponse,
+    EmailItem,
+    FetchAndDetectResponse,
+    FetchDetectPredictResponse,
+)
 from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
 from app.services.detection import categorize_email, detect_batch
-from app.schemas.detection import EmailInput as DetectionEmailInput
 from app.services.gmail_service import GmailService
 from app.services.outlook_email_service import (
-    fetch_outlook_emails,
     fetch_outlook_email_page,
+    fetch_outlook_emails,
     is_outlook_connected,
 )
 from app.services.prediction_service import get_suggested_slots
@@ -29,11 +34,11 @@ logger = logging.getLogger(__name__)
 
 def _sort_key(date_str: str | None) -> datetime:
     if not date_str:
-        return datetime.min.replace(tzinfo=timezone.utc)
+        return datetime.min.replace(tzinfo=UTC)
     try:
         return _parsedate(date_str)
     except Exception:
-        return datetime.min.replace(tzinfo=timezone.utc)
+        return datetime.min.replace(tzinfo=UTC)
 
 
 def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> None:
@@ -359,7 +364,7 @@ def sync_user_emails_background(user_id: int) -> None:
     Called as a FastAPI BackgroundTask after OAuth so the DB is populated before
     the frontend's next /emails/cached or /emails/feed poll."""
     from app.db.database import SessionLocal  # local import — runs in background thread
-    from app.schemas.detection import EmailInput as _DI
+    from app.schemas.detection import EmailInput  # noqa: PLC0414
     db = SessionLocal()
     try:
         items: list[EmailItem] = []
@@ -374,7 +379,7 @@ def sync_user_emails_background(user_id: int) -> None:
                         message_id=r["message_id"],
                         sender=r.get("sender"),
                         date=r.get("date"),
-                        category=categorize_email(_DI(subject=r["subject"], body=r["body"])),
+                        category=categorize_email(EmailInput(subject=r["subject"], body=r["body"])),
                         provider="gmail",
                     )
                     for r in raw_list

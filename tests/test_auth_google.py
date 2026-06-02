@@ -7,7 +7,6 @@ import app.api.routes.auth_google as auth_google
 from app.main import app
 from app.services.google_oauth_service import GoogleOAuthExchangeError
 
-
 client = TestClient(app)
 
 

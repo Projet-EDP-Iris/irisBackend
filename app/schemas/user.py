@@ -8,6 +8,14 @@ from pydantic import BaseModel, EmailStr, StringConstraints, field_validator
 Password = Annotated[str, StringConstraints(min_length=8, max_length=72)]
 
 
+def _validate_strong_password(v: str) -> str:
+    if not re.search(r"\d", v):
+        raise ValueError("Password must include at least one digit")
+    if not re.search(r"[@$!%*?&]", v):
+        raise ValueError("Password must include at least one special character @$!%*?&")
+    return v
+
+
 class UserCreate(BaseModel):
     email: EmailStr
     password: Password
@@ -18,11 +26,7 @@ class UserCreate(BaseModel):
     @field_validator("password")
     @classmethod
     def strong_password(cls, v: str) -> str:
-        if not re.search(r"\d", v):
-            raise ValueError("Password must include at least one digit")
-        if not re.search(r"[@$!%*?&]", v):
-            raise ValueError("Password must include at least one special character @$!%*?&")
-        return v
+        return _validate_strong_password(v)
 
 
 class UserResponse(BaseModel):
@@ -35,6 +39,7 @@ class UserResponse(BaseModel):
     bank_account_id: str | None = None
     oauth_provider: str | None = None
     require_password_reset: bool
+    is_email_verified: bool
     calendar_providers: list[str] = []
     created_at: datetime
 
@@ -63,11 +68,7 @@ class UserUpdate(BaseModel):
     def strong_password(cls, v: str | None) -> str | None:
         if v is None:
             return v
-        if not re.search(r"\d", v):
-            raise ValueError("Password must include at least one digit")
-        if not re.search(r"[@$!%*?&]", v):
-            raise ValueError("Password must include at least one special character @$!%*?&")
-        return v
+        return _validate_strong_password(v)
 
 
 class LoginRequest(BaseModel):

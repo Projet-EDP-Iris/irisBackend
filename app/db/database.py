@@ -5,7 +5,7 @@ from app.core.config import settings
 
 # Import Base and all models to ensure they're registered with Base.metadata
 # This MUST be done before calling Base.metadata.create_all()
-from app.models import Base, DetectionFeedback, User  # noqa: F401
+from app.models import AuthToken, Base, DetectionFeedback, User  # noqa: F401
 
 _db_url = settings.DATABASE_URL
 # Render (and some other hosts) provide "postgres://" but SQLAlchemy 2.0
@@ -55,6 +55,10 @@ def init_db():
             connection.execute(text("ALTER TABLE users ADD COLUMN outlook_oauth_token TEXT"))
         if "outlook_email" not in user_columns:
             connection.execute(text("ALTER TABLE users ADD COLUMN outlook_email VARCHAR(255)"))
+        if "is_email_verified" not in user_columns:
+            connection.execute(text(
+                "ALTER TABLE users ADD COLUMN is_email_verified BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
 
         # Email table columns (added in v2) — keep try/except in case emails
         # table doesn't exist yet on a brand-new deployment (create_all handles it).

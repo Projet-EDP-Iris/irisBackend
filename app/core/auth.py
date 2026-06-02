@@ -65,9 +65,9 @@ def get_current_user(
 def get_current_active_user(
     current_user: User = Depends(get_current_user)
 ) -> User:
-    """
-    Dependency to get current active user.
-    Can be extended to check for disabled users, email verification, etc.
-    """
-    # Future: Add checks for user.is_active, user.email_verified, etc.
+    if not current_user.is_email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email address not verified. Check your inbox or request a new verification link at POST /api/v1/auth/resend-verification.",
+        )
     return current_user

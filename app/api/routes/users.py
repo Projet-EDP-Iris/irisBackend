@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -7,14 +7,22 @@ from app.core.config import settings
 from app.core.encryption import encrypt
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.database import get_db
+from app.models.auth_token import TokenType
 from app.models.user import User
+from app.schemas.auth import ChangePasswordRequest, MessageResponse
 from app.schemas.user import LoginRequest, Token, UserCreate, UserResponse, UserUpdate
+from app.services.auth_token_service import create_token
+from app.services.email_service import send_verification_email
 
 router = APIRouter(prefix="/users", tags=["users"])
 
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=UserResponse)
-def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
-    """Create a new user account."""
+async def create_user(
+    user_in: UserCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Create a new user account. A verification email will be sent to the provided address."""
     existing_user = db.query(User).filter_by(email=user_in.email).first()
     if existing_user:
         raise HTTPException(
@@ -27,11 +35,21 @@ def create_user(user_in: UserCreate, db: Session = Depends(get_db)):
         password_hash=hash_password(user_in.password),
         name=user_in.name,
         profile_icon=user_in.profile_icon,
-        role=user_in.role
+        role=user_in.role,
+        is_email_verified=False,
     )
     db.add(user)
+    db.flush()
+
+    token = create_token(
+        db=db,
+        user_id=user.id,
+        token_type=TokenType.email_verification,
+        expires_minutes=settings.EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS * 60,
+    )
     db.commit()
     db.refresh(user)
+    background_tasks.add_task(send_verification_email, user.email, token)
     return user
 
 @router.post("/login", response_model=Token)
@@ -56,6 +74,13 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Block unverified accounts
+    if not user.is_email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Email address not verified. Check your inbox or request a new link at POST /api/v1/auth/resend-verification.",
         )
 
     # Create access token
@@ -92,6 +117,25 @@ def get_all_users(
 def get_current_user_info(current_user: User = Depends(get_current_active_user)):
     """Get the currently authenticated user's information."""
     return current_user
+
+
+@router.patch("/me/change-password", response_model=MessageResponse)
+def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> MessageResponse:
+    """Change the authenticated user's password by confirming the current one."""
+    if not verify_password(body.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect.",
+        )
+    current_user.password_hash = hash_password(body.new_password)
+    current_user.require_password_reset = False
+    db.commit()
+    return MessageResponse(message="Password changed successfully.")
+
 
 @router.get("/{user_id}", response_model=UserResponse)
 def get_user(

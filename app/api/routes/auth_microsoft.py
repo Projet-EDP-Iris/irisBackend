@@ -19,16 +19,16 @@ How it works:
 The `state` parameter is an HMAC-signed string containing the user_id, which
 prevents CSRF attacks.
 """
-import os
 import logging
-from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
+import os
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import RedirectResponse
 
 from app.core.auth import get_current_active_user
 from app.models.user import User
-from app.services.microsoft_oauth_service import exchange_code_for_token, get_auth_url, _token_path
+from app.services.microsoft_oauth_service import exchange_code_for_token, get_auth_url
 from app.services.outlook_email_service import get_outlook_connection_status
 
 router = APIRouter(tags=["auth"])

@@ -8,15 +8,11 @@ Tests:
   - emails endpoint merges Gmail + Outlook results
   - emails endpoint returns 404 when neither provider is connected
 """
-import json
-import os
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from app.schemas.email import EmailItem
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -45,20 +41,18 @@ def _make_graph_message(
 # ---------------------------------------------------------------------------
 
 class TestIsOutlookConnected:
-    def test_returns_false_when_no_token_file(self, tmp_path, monkeypatch):
+    def test_returns_false_when_no_token_file(self, monkeypatch):
         monkeypatch.setattr(
-            "app.services.outlook_email_service._token_path",
-            lambda uid: str(tmp_path / f"outlook_user_{uid}.json"),
+            "app.services.outlook_email_service._load_outlook_token_from_db",
+            lambda uid: None,
         )
         from app.services.outlook_email_service import is_outlook_connected
         assert is_outlook_connected(999) is False
 
-    def test_returns_true_when_token_file_exists(self, tmp_path, monkeypatch):
-        token_file = tmp_path / "outlook_user_1.json"
-        token_file.write_text("{}")
+    def test_returns_true_when_token_file_exists(self, monkeypatch):
         monkeypatch.setattr(
-            "app.services.outlook_email_service._token_path",
-            lambda uid: str(tmp_path / f"outlook_user_{uid}.json"),
+            "app.services.outlook_email_service._load_outlook_token_from_db",
+            lambda uid: {"access_token": "tok"},
         )
         from app.services.outlook_email_service import is_outlook_connected
         assert is_outlook_connected(1) is True
@@ -155,21 +149,19 @@ class TestFetchOutlookEmails:
 # ---------------------------------------------------------------------------
 
 class TestGetOutlookConnectionStatus:
-    def test_not_connected(self, tmp_path, monkeypatch):
+    def test_not_connected(self, monkeypatch):
         monkeypatch.setattr(
-            "app.services.outlook_email_service._token_path",
-            lambda uid: str(tmp_path / f"outlook_user_{uid}.json"),
+            "app.services.outlook_email_service._load_outlook_token_from_db",
+            lambda uid: None,
         )
         from app.services.outlook_email_service import get_outlook_connection_status
         result = get_outlook_connection_status(99)
         assert result == {"connected": False, "email": None}
 
-    def test_connected_returns_email(self, tmp_path, monkeypatch):
-        token_file = tmp_path / "outlook_user_1.json"
-        token_file.write_text("{}")
+    def test_connected_returns_email(self, monkeypatch):
         monkeypatch.setattr(
-            "app.services.outlook_email_service._token_path",
-            lambda uid: str(tmp_path / f"outlook_user_{uid}.json"),
+            "app.services.outlook_email_service._load_outlook_token_from_db",
+            lambda uid: {"access_token": "tok"},
         )
         monkeypatch.setattr(
             "app.services.outlook_email_service.get_valid_token",

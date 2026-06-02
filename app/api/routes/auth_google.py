@@ -10,11 +10,11 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.db.database import get_db
 from app.models.user import User
-from sqlalchemy.orm import Session
 from app.services.google_oauth_service import (
     GoogleOAuthExchangeError,
     exchange_code_for_token,

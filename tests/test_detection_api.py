@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.main import app
 from app.models import Base
+from app.models.user import User
 
 TEST_DATABASE_URL = "sqlite:///./test.db"
 test_engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
@@ -50,12 +51,25 @@ def setup_database(client_with_db):
     Base.metadata.drop_all(bind=test_engine)
 
 
+def _verify_user(email: str) -> None:
+    """Mark user as email-verified directly in test DB."""
+    db = TestSessionLocal()
+    try:
+        user = db.query(User).filter_by(email=email).first()
+        if user:
+            user.is_email_verified = True
+            db.commit()
+    finally:
+        db.close()
+
+
 @pytest.fixture
 def auth_headers(client_with_db, setup_database):
     client_with_db.post(
         "/api/v1/users/",
         json={"email": "detect@example.com", "password": "Secret12!", "role": "regular"},
     )
+    _verify_user("detect@example.com")
     login = client_with_db.post(
         "/api/v1/users/login",
         json={"email": "detect@example.com", "password": "Secret12!"},

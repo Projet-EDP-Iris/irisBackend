@@ -251,8 +251,17 @@ def setup_calendar(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="apple_caldav_user and apple_caldav_password are required for Apple Calendar",
             )
+        encrypted_pw = encrypt(body.apple_caldav_password)
+        try:
+            from app.services.apple_calendar_service import test_connection  # noqa: PLC0415
+            test_connection(body.apple_caldav_user, encrypted_pw)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Could not connect to Apple Calendar: {exc}",
+            ) from exc
         current_user.apple_caldav_user = body.apple_caldav_user
-        current_user.apple_caldav_password = encrypt(body.apple_caldav_password)
+        current_user.apple_caldav_password = encrypted_pw
 
     # Append to calendar_providers list (deduplicated)
     current_providers: list[str] = list(current_user.calendar_providers or [])
@@ -287,6 +296,10 @@ def disconnect_calendar(
     current_user.calendar_providers = current_providers
     if current_user.calendar_provider == provider:
         current_user.calendar_provider = current_providers[-1] if current_providers else None
+
+    if provider == "apple":
+        current_user.apple_caldav_user = None
+        current_user.apple_caldav_password = None
 
     db.commit()
     db.refresh(current_user)

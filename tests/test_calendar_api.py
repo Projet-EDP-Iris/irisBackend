@@ -137,8 +137,10 @@ class TestCalendarSetup:
         assert r.status_code == 200
         assert "google" in r.json()["calendar_providers"]
 
-    def test_setup_apple_provider_with_credentials(self):
-        """Saving 'apple' with user + password succeeds."""
+    @patch("app.services.apple_calendar_service.test_connection")
+    def test_setup_apple_provider_with_credentials(self, mock_test_conn):
+        """Saving 'apple' with user + password succeeds (connection is validated)."""
+        mock_test_conn.return_value = None  # simulate successful connection
         token = _create_and_login()
         r = client.patch(
             "/api/v1/users/me/calendar-setup",
@@ -151,6 +153,7 @@ class TestCalendarSetup:
         )
         assert r.status_code == 200
         assert "apple" in r.json()["calendar_providers"]
+        mock_test_conn.assert_called_once()
 
     def test_setup_apple_without_credentials_returns_400(self):
         """'apple' provider with missing credentials must return 400."""
@@ -181,10 +184,12 @@ class TestCalendarSetup:
         )
         assert r.status_code == 403
 
-    def test_apple_password_is_not_stored_in_plain_text(self):
+    @patch("app.services.apple_calendar_service.test_connection")
+    def test_apple_password_is_not_stored_in_plain_text(self, mock_test_conn):
         """The raw App Password must never appear in plain text in the DB."""
         from app.core.encryption import decrypt
 
+        mock_test_conn.return_value = None
         token = _create_and_login()
         plain_password = APPLE_CALDAV_PASSWORD
         client.patch(
@@ -247,15 +252,16 @@ class TestConfirmCalendar:
     def test_confirm_apple_event_created(self):
         """Confirm with Apple provider: Apple service is called, returns UID."""
         token = _create_and_login()
-        client.patch(
-            "/api/v1/users/me/calendar-setup",
-            headers=_auth(token),
-            json={
-                "calendar_provider": "apple",
-                "apple_caldav_user": APPLE_CALDAV_USER,
-                "apple_caldav_password": APPLE_CALDAV_PASSWORD,
-            },
-        )
+        with patch("app.services.apple_calendar_service.test_connection"):
+            client.patch(
+                "/api/v1/users/me/calendar-setup",
+                headers=_auth(token),
+                json={
+                    "calendar_provider": "apple",
+                    "apple_caldav_user": APPLE_CALDAV_USER,
+                    "apple_caldav_password": APPLE_CALDAV_PASSWORD,
+                },
+            )
         email_id = _seed_email_with_slots(token)
 
         with patch(

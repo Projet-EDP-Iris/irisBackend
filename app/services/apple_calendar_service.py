@@ -27,6 +27,22 @@ def _fmt_utc(dt: datetime) -> str:
     return dt.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
+def _ics_escape(text: str) -> str:
+    """Escape text for use in iCalendar SUMMARY/DESCRIPTION per RFC 5545.
+
+    Escapes backslashes, semicolons, commas, and line endings so that arbitrary
+    meeting titles/descriptions cannot inject extra ICS fields (CRLF injection).
+    """
+    return (
+        text.replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\r\n", "\\n")
+        .replace("\n", "\\n")
+        .replace("\r", "\\n")
+    )
+
+
 def test_connection(apple_user: str, encrypted_password: str) -> None:
     """
     Validate that the Apple ID + App-Specific Password can reach iCloud CalDAV.
@@ -96,8 +112,8 @@ def create_apple_calendar_event(
         f"DTSTAMP:{dtstamp}\r\n"
         f"DTSTART:{_fmt_utc(start_time)}\r\n"
         f"DTEND:{_fmt_utc(end_time)}\r\n"
-        f"SUMMARY:{summary}\r\n"
-        f"DESCRIPTION:{description or ''}\r\n"
+        f"SUMMARY:{_ics_escape(summary)}\r\n"
+        f"DESCRIPTION:{_ics_escape(description or '')}\r\n"
         "END:VEVENT\r\n"
         "END:VCALENDAR\r\n"
     )
@@ -125,23 +141,24 @@ def update_apple_calendar_event(
     _, _, calendars = _connect(apple_user, plain_password)
 
     for calendar in calendars:
-        try:
-            results = calendar.search(uid=uid)
-            if results:
-                event = results[0]
-                vevent = event.vobject_instance.vevent
-                vevent.summary.value = summary
-                vevent.dtstart.value = datetime.strptime(_fmt_utc(start_time), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
-                vevent.dtend.value = datetime.strptime(_fmt_utc(end_time), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
-                if description is not None:
-                    if hasattr(vevent, "description"):
-                        vevent.description.value = description
-                    else:
-                        vevent.add("description").value = description
-                event.save()
-                return
-        except Exception:  # noqa: BLE001
+        results = calendar.search(uid=uid)
+        if not results:
             continue
+        try:
+            event = results[0]
+            vevent = event.vobject_instance.vevent
+            vevent.summary.value = summary
+            vevent.dtstart.value = datetime.strptime(_fmt_utc(start_time), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+            vevent.dtend.value = datetime.strptime(_fmt_utc(end_time), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+            if description is not None:
+                if hasattr(vevent, "description"):
+                    vevent.description.value = description
+                else:
+                    vevent.add("description").value = description
+            event.save()
+            return
+        except Exception as exc:
+            raise RuntimeError(f"Failed while updating iCloud event {uid!r}: {exc}") from exc
 
     raise RuntimeError(f"Event UID {uid!r} not found in any iCloud calendar for {apple_user}")
 
@@ -161,12 +178,13 @@ def delete_apple_calendar_event(
     _, _, calendars = _connect(apple_user, plain_password)
 
     for calendar in calendars:
-        try:
-            results = calendar.search(uid=uid)
-            if results:
-                results[0].delete()
-                return
-        except Exception:  # noqa: BLE001
+        results = calendar.search(uid=uid)
+        if not results:
             continue
+        try:
+            results[0].delete()
+            return
+        except Exception as exc:
+            raise RuntimeError(f"Failed while deleting iCloud event {uid!r}: {exc}") from exc
 
     raise RuntimeError(f"Event UID {uid!r} not found in any iCloud calendar for {apple_user}")

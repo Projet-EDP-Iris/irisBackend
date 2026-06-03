@@ -34,9 +34,9 @@ test_engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": Fals
 TestSession = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 APPLE_USER = "user@icloud.com"
-APPLE_PASSWORD = "TestApple!123"
+APPLE_PASSWORD = "TestApple!123"  # noqa: S105
 USER_EMAIL = "appletest@example.com"
-USER_PASSWORD = "AppleTest1!"
+USER_PASSWORD = "AppleTest1!"  # noqa: S105
 
 # Computed fresh in the autouse fixture so Fernet key is always current.
 ENCRYPTED_PW: str = ""

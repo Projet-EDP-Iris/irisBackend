@@ -18,7 +18,11 @@ def apple_calendar_status(
         email (str | None) — The connected Apple ID email address
     """
     providers = current_user.calendar_providers or []
-    connected = "apple" in providers and bool(current_user.apple_caldav_user)
+    connected = (
+        "apple" in providers
+        and bool(current_user.apple_caldav_user)
+        and bool(current_user.apple_caldav_password)
+    )
     return {
         "connected": connected,
         "email": current_user.apple_caldav_user if connected else None,

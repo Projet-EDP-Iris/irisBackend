@@ -7,7 +7,7 @@ client = TestClient(app)
 def test_root_endpoint():
     response = client.get("/")
     assert response.status_code == 200
-    assert response.json() == {"message": "Bienvenue sur l'API Iris - Le pipeline est opérationnel !"}
+    assert response.json() == {"message": "Iris API — pipeline is operational"}
 
 def test_health_check():
     response = client.get("/health")

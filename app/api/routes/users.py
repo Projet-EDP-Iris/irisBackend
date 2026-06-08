@@ -12,7 +12,7 @@ from app.models.user import User
 from app.schemas.auth import ChangePasswordRequest, MessageResponse
 from app.schemas.user import LoginRequest, Token, UserCreate, UserResponse, UserUpdate
 from app.services.auth_token_service import create_token
-from app.services.email_service import send_verification_email
+from app.services.email_service import send_verification_email, send_welcome_email
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -50,6 +50,7 @@ async def create_user(
     db.commit()
     db.refresh(user)
     background_tasks.add_task(send_verification_email, user.email, token)
+    background_tasks.add_task(send_welcome_email, user.email, user.name)
     return user
 
 @router.post("/login", response_model=Token)

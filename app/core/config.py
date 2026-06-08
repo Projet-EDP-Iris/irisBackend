@@ -46,14 +46,10 @@ class Settings(BaseSettings):
     # Frontend URL — used in email links
     FRONTEND_URL: str = Field(default="http://localhost:5173")
 
-    # Email (SMTP) — set EMAIL_ENABLED=true and configure SMTP to send real emails
+    # Email (Resend) — set EMAIL_ENABLED=true and RESEND_API_KEY to send real emails
     EMAIL_ENABLED: bool = Field(default=False)
-    SMTP_HOST: str = Field(default="smtp.gmail.com")
-    SMTP_PORT: int = Field(default=587)
-    SMTP_USE_TLS: bool = Field(default=True)
-    SMTP_USERNAME: str | None = Field(default=None)
-    SMTP_PASSWORD: str | None = Field(default=None)
-    SMTP_FROM_EMAIL: str = Field(default="noreply@iris-app.com")
+    RESEND_API_KEY: str | None = Field(default=None)
+    RESEND_FROM_EMAIL: str = Field(default="onboarding@resend.dev")
 
     # Token expiry
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = Field(default=30)

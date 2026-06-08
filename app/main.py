@@ -14,6 +14,7 @@ from app.api.routes.auth_google import router as google_auth_router
 from app.api.routes.auth_microsoft import router as microsoft_auth_router
 from app.api.routes.detection import router as detection_router
 from app.api.routes.users import router as user_router
+from app.api.routes.web_pages import router as web_pages_router
 from app.core.config import settings
 from app.db.database import engine, init_db
 from app.models import Base
@@ -94,6 +95,9 @@ app.include_router(auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(apple_auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(google_auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(microsoft_auth_router, prefix="/api/v1", tags=["auth"])
+
+
+app.include_router(web_pages_router)
 
 
 @app.get("/", tags=["system"])

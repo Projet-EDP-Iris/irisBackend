@@ -10,7 +10,7 @@ APPLE_CALDAV_URL = "https://caldav.icloud.com"
 
 def _connect(apple_user: str, plain_password: str):
     """Return (client, principal, calendars). Raises on auth failure."""
-    client = caldav.DAVClient(
+    client = caldav.DAVClient(  # type: ignore[operator]
         url=APPLE_CALDAV_URL,
         username=apple_user,
         password=plain_password,

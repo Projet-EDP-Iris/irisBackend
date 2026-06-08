@@ -8,6 +8,69 @@ from app.core.encryption import decrypt
 APPLE_CALDAV_URL = "https://caldav.icloud.com"
 
 
+def _connect(apple_user: str, plain_password: str):
+    """Return (client, principal, calendars). Raises on auth failure."""
+    client = caldav.DAVClient(  # type: ignore[operator]
+        url=APPLE_CALDAV_URL,
+        username=apple_user,
+        password=plain_password,
+    )
+    principal = client.principal()
+    calendars = principal.calendars()
+    return client, principal, calendars
+
+
+def _fmt_utc(dt: datetime) -> str:
+    """Format datetime as compact UTC iCalendar string (YYYYMMDDTHHMMSSZ)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+
+
+def _ics_escape(text: str) -> str:
+    """Escape text for use in iCalendar SUMMARY/DESCRIPTION per RFC 5545.
+
+    Escapes backslashes, semicolons, commas, and line endings so that arbitrary
+    meeting titles/descriptions cannot inject extra ICS fields (CRLF injection).
+    """
+    return (
+        text.replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\r\n", "\\n")
+        .replace("\n", "\\n")
+        .replace("\r", "\\n")
+    )
+
+
+def test_connection(apple_user: str, encrypted_password: str) -> None:
+    """
+    Validate that the Apple ID + App-Specific Password can reach iCloud CalDAV.
+
+    Raises RuntimeError or a caldav exception if authentication fails or if the
+    account has no calendars. Call this before persisting credentials.
+
+    App-Specific Passwords are generated at appleid.apple.com → Security →
+    App-Specific Passwords. They look like xxxx-xxxx-xxxx-xxxx and require
+    2-Factor Authentication to be enabled on the Apple ID.
+    """
+    plain_password = decrypt(encrypted_password)
+    _, _, calendars = _connect(apple_user, plain_password)
+    if not calendars:
+        raise RuntimeError(f"No iCloud calendars found for {apple_user}")
+
+
+def list_calendars(apple_user: str, encrypted_password: str) -> list[dict]:
+    """
+    Return a list of the user's iCloud calendars.
+
+    Each entry: {"name": str, "url": str}
+    """
+    plain_password = decrypt(encrypted_password)
+    _, _, calendars = _connect(apple_user, plain_password)
+    return [{"name": cal.name, "url": str(cal.url)} for cal in calendars]
+
+
 def create_apple_calendar_event(
     apple_user: str,
     encrypted_password: str,
@@ -32,33 +95,13 @@ def create_apple_calendar_event(
     the same format used when you receive a meeting invite by email.
     """
     plain_password = decrypt(encrypted_password)
-
-    # caldav.DAVClient manages the HTTPS connection with HTTP Basic Auth
-    client = caldav.DAVClient(
-        url=APPLE_CALDAV_URL,
-        username=apple_user,
-        password=plain_password,
-    )
-
-    # principal() is the user's CalDAV "account root"
-    principal = client.principal()
-
-    calendars = principal.calendars()
+    _, _, calendars = _connect(apple_user, plain_password)
     if not calendars:
         raise RuntimeError(f"No iCloud calendars found for {apple_user}")
 
-    # Use the first calendar (the user's primary/default calendar)
     calendar = calendars[0]
-
     event_uid = str(uuid.uuid4())
-
-    # DTSTART/DTEND must be in compact UTC format: YYYYMMDDTHHMMSSZ
-    def _fmt(dt: datetime) -> str:
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=UTC)
-        return dt.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-
-    dtstamp = _fmt(datetime.now(UTC))
+    dtstamp = _fmt_utc(datetime.now(UTC))
 
     ics = (
         "BEGIN:VCALENDAR\r\n"
@@ -67,14 +110,81 @@ def create_apple_calendar_event(
         "BEGIN:VEVENT\r\n"
         f"UID:{event_uid}\r\n"
         f"DTSTAMP:{dtstamp}\r\n"
-        f"DTSTART:{_fmt(start_time)}\r\n"
-        f"DTEND:{_fmt(end_time)}\r\n"
-        f"SUMMARY:{summary}\r\n"
-        f"DESCRIPTION:{description or ''}\r\n"
+        f"DTSTART:{_fmt_utc(start_time)}\r\n"
+        f"DTEND:{_fmt_utc(end_time)}\r\n"
+        f"SUMMARY:{_ics_escape(summary)}\r\n"
+        f"DESCRIPTION:{_ics_escape(description or '')}\r\n"
         "END:VEVENT\r\n"
         "END:VCALENDAR\r\n"
     )
 
     calendar.save_event(ics)
-
     return event_uid
+
+
+def update_apple_calendar_event(
+    apple_user: str,
+    encrypted_password: str,
+    uid: str,
+    summary: str,
+    start_time: datetime,
+    end_time: datetime,
+    description: str | None = None,
+) -> None:
+    """
+    Update an existing iCloud Calendar event identified by its UID.
+
+    uid: the UUID string returned by create_apple_calendar_event().
+    Raises RuntimeError if the event is not found in any of the user's calendars.
+    """
+    plain_password = decrypt(encrypted_password)
+    _, _, calendars = _connect(apple_user, plain_password)
+
+    for calendar in calendars:
+        results = calendar.search(uid=uid)
+        if not results:
+            continue
+        try:
+            event = results[0]
+            vevent = event.vobject_instance.vevent
+            vevent.summary.value = summary
+            vevent.dtstart.value = datetime.strptime(_fmt_utc(start_time), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+            vevent.dtend.value = datetime.strptime(_fmt_utc(end_time), "%Y%m%dT%H%M%SZ").replace(tzinfo=UTC)
+            if description is not None:
+                if hasattr(vevent, "description"):
+                    vevent.description.value = description
+                else:
+                    vevent.add("description").value = description
+            event.save()
+            return
+        except Exception as exc:
+            raise RuntimeError(f"Failed while updating iCloud event {uid!r}: {exc}") from exc
+
+    raise RuntimeError(f"Event UID {uid!r} not found in any iCloud calendar for {apple_user}")
+
+
+def delete_apple_calendar_event(
+    apple_user: str,
+    encrypted_password: str,
+    uid: str,
+) -> None:
+    """
+    Delete an iCloud Calendar event by its UID.
+
+    uid: the UUID string returned by create_apple_calendar_event().
+    Raises RuntimeError if the event is not found.
+    """
+    plain_password = decrypt(encrypted_password)
+    _, _, calendars = _connect(apple_user, plain_password)
+
+    for calendar in calendars:
+        results = calendar.search(uid=uid)
+        if not results:
+            continue
+        try:
+            results[0].delete()
+            return
+        except Exception as exc:
+            raise RuntimeError(f"Failed while deleting iCloud event {uid!r}: {exc}") from exc
+
+    raise RuntimeError(f"Event UID {uid!r} not found in any iCloud calendar for {apple_user}")

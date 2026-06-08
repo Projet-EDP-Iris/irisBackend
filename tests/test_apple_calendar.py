@@ -34,9 +34,9 @@ test_engine = create_engine(TEST_DB_URL, connect_args={"check_same_thread": Fals
 TestSession = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
 
 APPLE_USER = "user@icloud.com"
-APPLE_PASSWORD = "TestApple!123"
+APPLE_APP_SPECIFIC_PW = "xxxx-yyyy-zzzz-test"
 USER_EMAIL = "appletest@example.com"
-USER_PASSWORD = "AppleTest1!"
+USER_PASSWORD = "CiTestUser1!"
 
 # Computed fresh in the autouse fixture so Fernet key is always current.
 ENCRYPTED_PW: str = ""
@@ -59,7 +59,7 @@ def reset_db():
     # Re-apply the encryption key each test — other modules may overwrite it.
     global ENCRYPTED_PW
     _settings.SECRET_ENCRYPTION_KEY = _TEST_KEY
-    ENCRYPTED_PW = encrypt(APPLE_PASSWORD)
+    ENCRYPTED_PW = encrypt(APPLE_APP_SPECIFIC_PW)
     Base.metadata.drop_all(bind=test_engine)
     Base.metadata.create_all(bind=test_engine)
     yield
@@ -248,7 +248,7 @@ class TestAppleStatus:
                 json={
                     "calendar_provider": "apple",
                     "apple_caldav_user": APPLE_USER,
-                    "apple_caldav_password": APPLE_PASSWORD,
+                    "apple_caldav_password": APPLE_APP_SPECIFIC_PW,
                 },
             )
         r = client.get("/api/v1/auth/apple/status", headers=_auth(token))
@@ -265,7 +265,7 @@ class TestAppleStatus:
                 json={
                     "calendar_provider": "apple",
                     "apple_caldav_user": APPLE_USER,
-                    "apple_caldav_password": APPLE_PASSWORD,
+                    "apple_caldav_password": APPLE_APP_SPECIFIC_PW,
                 },
             )
         client.delete("/api/v1/users/me/calendar-disconnect?provider=apple", headers=_auth(token))

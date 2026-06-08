@@ -37,6 +37,7 @@ async def create_user(
         profile_icon=user_in.profile_icon,
         role=user_in.role,
         is_email_verified=False,
+        has_accepted_terms=user_in.accepted_terms,
     )
     db.add(user)
     db.flush()

@@ -59,6 +59,10 @@ def init_db():
             connection.execute(text(
                 "ALTER TABLE users ADD COLUMN is_email_verified BOOLEAN NOT NULL DEFAULT FALSE"
             ))
+        if "has_accepted_terms" not in user_columns:
+            connection.execute(text(
+                "ALTER TABLE users ADD COLUMN has_accepted_terms BOOLEAN NOT NULL DEFAULT TRUE"
+            ))
 
         # Email table columns (added in v2) — keep try/except in case emails
         # table doesn't exist yet on a brand-new deployment (create_all handles it).

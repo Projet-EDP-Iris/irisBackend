@@ -91,7 +91,10 @@ async def verify_email_page():
         }
       })();
     """
-    return HTMLResponse(_SHELL.format(title="Verify Email", body=body, script=script))
+    return HTMLResponse(
+        _SHELL.format(title="Verify Email", body=body, script=script),
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
 
 
 @router.get("/reset-password", response_class=HTMLResponse)
@@ -164,4 +167,7 @@ async def reset_password_page():
         }
       }
     """
-    return HTMLResponse(_SHELL.format(title="Reset Password", body=body, script=script))
+    return HTMLResponse(
+        _SHELL.format(title="Reset Password", body=body, script=script),
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )

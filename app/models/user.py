@@ -18,6 +18,7 @@ class User(Base, TimestampMixin):
     oauth_provider: Mapped[str | None] = mapped_column(String(50), nullable=True)
     require_password_reset: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_email_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    has_accepted_terms: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Calendar integration
     calendar_provider: Mapped[str | None] = mapped_column(String(20), nullable=True)

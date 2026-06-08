@@ -51,6 +51,8 @@ def _iris_email_html(title: str, body_html: str) -> str:
 
 
 def _send(to_email: str, subject: str, html: str) -> None:
+    if not settings.RESEND_API_KEY:
+        raise RuntimeError("RESEND_API_KEY must be set when EMAIL_ENABLED=true")
     resend.api_key = settings.RESEND_API_KEY
     resend.Emails.send({
         "from": settings.RESEND_FROM_EMAIL,
@@ -60,7 +62,7 @@ def _send(to_email: str, subject: str, html: str) -> None:
     })
 
 
-async def send_password_reset_email(to_email: str, token: str) -> None:
+def send_password_reset_email(to_email: str, token: str) -> None:
     if not settings.EMAIL_ENABLED:
         logger.info("EMAIL_ENABLED=False — skipping password reset email to %s", to_email)
         return
@@ -93,7 +95,7 @@ async def send_password_reset_email(to_email: str, token: str) -> None:
         logger.exception("Failed to send password reset email to %s", to_email)
 
 
-async def send_verification_email(to_email: str, token: str) -> None:
+def send_verification_email(to_email: str, token: str) -> None:
     if not settings.EMAIL_ENABLED:
         logger.info("EMAIL_ENABLED=False — skipping verification email to %s", to_email)
         return
@@ -126,7 +128,7 @@ async def send_verification_email(to_email: str, token: str) -> None:
         logger.exception("Failed to send verification email to %s", to_email)
 
 
-async def send_welcome_email(to_email: str, name: str | None = None) -> None:
+def send_welcome_email(to_email: str, name: str | None = None) -> None:
     if not settings.EMAIL_ENABLED:
         logger.info("EMAIL_ENABLED=False — skipping welcome email to %s", to_email)
         return

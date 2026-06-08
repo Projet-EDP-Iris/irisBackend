@@ -22,6 +22,7 @@ class UserCreate(BaseModel):
     name: str | None = None
     profile_icon: str | None = None
     role: str = "regular"
+    accepted_terms: bool = False
 
     @field_validator("password")
     @classmethod
@@ -40,6 +41,7 @@ class UserResponse(BaseModel):
     oauth_provider: str | None = None
     require_password_reset: bool
     is_email_verified: bool
+    has_accepted_terms: bool
     calendar_providers: list[str] = []
     created_at: datetime
 

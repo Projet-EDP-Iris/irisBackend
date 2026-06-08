@@ -1,5 +1,6 @@
 import os
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel
@@ -27,17 +28,25 @@ logger = logging.getLogger(__name__)
 
 
 def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> None:
-    """Insert or locate each email in the DB and populate db_id on the item."""
+    """Insert or locate each email in the DB and populate db_id on the item.
+
+    Uses a single bulk SELECT instead of one query per email to handle 999+ emails efficiently.
+    """
+    ids = [it.message_id for it in items if it.message_id]
+    if not ids:
+        return
+    existing_map: dict[str, int] = {
+        row[0]: row[1]
+        for row in db.query(Email.message_id, Email.id)
+                     .filter(Email.user_id == user_id, Email.message_id.in_(ids))
+                     .all()
+    }
+    new_pairs: list[tuple[EmailItem, Email]] = []
     for item in items:
         if not item.message_id:
             continue
-        existing = (
-            db.query(Email)
-            .filter(Email.message_id == item.message_id, Email.user_id == user_id)
-            .first()
-        )
-        if existing:
-            item.db_id = existing.id
+        if item.message_id in existing_map:
+            item.db_id = existing_map[item.message_id]
         else:
             db_email = Email(
                 subject=item.subject,
@@ -47,7 +56,10 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
                 status="fetched",
             )
             db.add(db_email)
-            db.flush()
+            new_pairs.append((item, db_email))
+    if new_pairs:
+        db.flush()
+        for item, db_email in new_pairs:
             item.db_id = db_email.id
     db.commit()
 
@@ -131,7 +143,6 @@ def get_emails(
     Aggregates from all connected providers (Gmail and/or Outlook).
     Returns HTTP 404 if neither Gmail nor Outlook is connected.
     """
-    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
     items = _get_all_emails_for_user(current_user.id, max_results=max_results)
     if items:
         with ThreadPoolExecutor(max_workers=min(8, len(items))) as executor:
@@ -140,7 +151,12 @@ def get_emails(
                 for i, it in enumerate(items)
             }
             for future in _as_completed(futures):
-                items[futures[future]].category = future.result()
+                idx = futures[future]
+                try:
+                    items[idx].category = future.result()
+                except Exception as exc:
+                    logger.warning("categorize_email failed for email %d: %s", idx, exc)
+                    items[idx].category = "info"
     _upsert_email_items(db, current_user.id, items)
     return items
 
@@ -277,7 +293,6 @@ def get_email_feed(
     all_emails = gmail_emails + outlook_emails
     all_emails.sort(key=lambda e: e.date or "", reverse=True)
 
-    from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
     if all_emails:
         with ThreadPoolExecutor(max_workers=min(8, len(all_emails))) as executor:
             futures = {

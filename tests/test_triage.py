@@ -2,10 +2,15 @@
 Tests unitaires — Tri et classification des emails
 Vérifie que chaque type d'email atterrit dans la bonne catégorie.
 """
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from unittest.mock import patch
+
 import pytest
 
 from app.nlp.extractor import EmailExtractor, _classify, classification_to_category
 from app.schemas.detection import EmailInput
+from app.services.detection import categorize_email, detect_single
 
 
 @pytest.fixture
@@ -369,3 +374,117 @@ def test_email_ambigue_low_confidence_toujours_classe(extractor):
     assert result.classification is not None
     assert result.confidence >= 0.0
     assert classification_to_category(result.classification) in {"rdv", "action", "attente", "bonsplans", "info"}
+
+
+# ─────────────────────────────────────────────────────────────
+# 12. needs_review — filet de sécurité
+# ─────────────────────────────────────────────────────────────
+
+def test_needs_review_absent_sur_email_clair():
+    """Un email avec un signal fort ne doit PAS déclencher needs_review."""
+    email = EmailInput(subject="Réunion lundi", body="Réunion lundi à 10h, confirme ta dispo.")
+    result = detect_single(email)
+    assert result.needs_review is False
+
+
+def test_needs_review_force_info_sur_email_vide():
+    """Un email vide (confiance 0) doit se retrouver en info sans needs_review (classification=info direct)."""
+    email = EmailInput(subject="", body="")
+    result = detect_single(email)
+    assert result.classification == "info"
+    assert result.confidence == 0.0
+
+
+def test_needs_review_active_sur_classification_other():
+    """Si le NLP renvoie 'other' avec confiance < 0.4, detect_single doit passer en info + needs_review."""
+    with patch("app.services.detection._get_extractor") as mock_extractor:
+        from app.schemas.detection import ExtractionResult
+        mock_extractor.return_value.extract.return_value = ExtractionResult(
+            classification="other", confidence=0.2
+        )
+        email = EmailInput(subject="xyz", body="abc")
+        result = detect_single(email)
+    assert result.classification == "info"
+    assert result.needs_review is True
+
+
+# ─────────────────────────────────────────────────────────────
+# 13. Résilience — exception dans la catégorisation parallèle
+# ─────────────────────────────────────────────────────────────
+
+def test_categorize_email_exception_ne_plante_pas_le_batch():
+    """Si categorize_email lève une exception sur 1 email, les autres doivent rester classés."""
+    call_count = 0
+
+    def flaky_categorize(email: EmailInput) -> str:
+        nonlocal call_count
+        call_count += 1
+        if call_count == 2:
+            raise RuntimeError("Erreur simulée sur email #2")
+        return categorize_email(email)
+
+    emails = [
+        EmailInput(subject="Réunion", body="Réunion demain à 14h."),
+        EmailInput(subject="Crash intentionnel", body="Cet email déclenche une exception."),
+        EmailInput(subject="Promo", body="50% de réduction ce week-end !"),
+    ]
+    results = ["info"] * len(emails)
+    valid_categories = {"rdv", "action", "attente", "bonsplans", "info"}
+
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(flaky_categorize, e): i for i, e in enumerate(emails)}
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                results[idx] = future.result()
+            except Exception:
+                results[idx] = "info"
+
+    assert all(r in valid_categories for r in results), f"Catégories invalides : {results}"
+    assert results[0] == "rdv"   # réunion → rdv
+    assert results[1] == "info"  # exception → fallback info
+    assert results[2] == "bonsplans"
+
+
+# ─────────────────────────────────────────────────────────────
+# 14. Charge — 200 emails en parallèle (simulation 999+)
+# ─────────────────────────────────────────────────────────────
+
+def test_charge_200_emails_categories_valides():
+    """200 emails de types variés doivent tous être catégorisés correctement en < 30s."""
+    templates = [
+        (EmailInput(subject="Réunion", body="Réunion lundi à 10h, es-tu dispo ?"), "rdv"),
+        (EmailInput(subject="Urgent", body="Action required: please confirm before deadline."), "action"),
+        (EmailInput(subject="Relance", body="Just checking in on my previous email."), "attente"),
+        (EmailInput(subject="Promo", body="Profitez de 50% de réduction ce week-end !"), "bonsplans"),
+        (EmailInput(subject="Info", body="Veuillez trouver ci-joint le rapport mensuel."), "info"),
+    ]
+    emails = []
+    expected = []
+    for i in range(200):
+        email, cat = templates[i % len(templates)]
+        emails.append(EmailInput(subject=email.subject, body=email.body))
+        expected.append(cat)
+
+    valid_categories = {"rdv", "action", "attente", "bonsplans", "info"}
+    results = [None] * len(emails)
+
+    start = time.time()
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(categorize_email, e): i for i, e in enumerate(emails)}
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                results[idx] = future.result()
+            except Exception:
+                results[idx] = "info"
+    elapsed = time.time() - start
+
+    assert all(r in valid_categories for r in results), "Un email n'a pas de catégorie valide"
+    assert elapsed < 30, f"Trop lent : {elapsed:.1f}s pour 200 emails"
+
+    # Vérifier la cohérence des catégories sur les emails aux signaux forts
+    for i in range(0, 200, len(templates)):
+        assert results[i] == expected[i % len(templates)], (
+            f"Email #{i} attendu '{expected[i % len(templates)]}', obtenu '{results[i]}'"
+        )

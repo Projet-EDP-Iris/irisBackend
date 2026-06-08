@@ -2,7 +2,16 @@
 
 Backend API for the Iris application, built with **FastAPI** and **Python 3.12**. Manages user authentication, Gmail integration, NLP email analysis, meeting slot prediction, multi-provider calendar sync, and AI-generated reply drafts.
 
-**🚀 Deployed on:** [Render](https://render.com)
+**Deployed on:** [Render](https://render.com)
+
+---
+
+## Download & Presentation
+
+| | |
+|---|---|
+| **Download the app** | [one-page-site-ten.vercel.app](https://one-page-site-ten.vercel.app/) |
+| **Presentation** | [![View on Canva](https://img.shields.io/badge/Canva-Presentation-blue?logo=canva)](https://canva.link/irisinc) |
 
 ---
 
@@ -146,10 +155,17 @@ poetry run pytest tests/test_encryption.py tests/test_calendar_services_unit.py 
 | `test_detection_llm_fallback.py` | OpenAI fallback behaviour |
 | `test_emails_api.py` | Gmail fetch pipeline endpoints |
 | `test_gmail_service.py` | Gmail OAuth token management |
+| `test_google_oauth_service.py` | Google OAuth service logic |
+| `test_auth_api.py` | Email verification and password reset flows |
+| `test_auth_google.py` | Google OAuth callback handling |
+| `test_apple_calendar.py` | Apple CalDAV connection and event creation |
+| `test_outlook_emails.py` | Outlook email parsing |
 | `test_prediction.py` / `test_prediction_api.py` / `test_prediction_service.py` | Slot prediction logic and endpoints |
+| `test_suggestion_api.py` | `/suggest/{email_id}` and `/suggest-inline` endpoints |
 | `test_encryption.py` | Fernet encrypt/decrypt round-trip and error handling |
 | `test_calendar_services_unit.py` | Google Calendar + Apple CalDAV services (all external calls mocked) |
 | `test_calendar_api.py` | `/calendar/confirm` and `/me/calendar-setup` integration tests |
+| `test_main.py` | Root and health check endpoints |
 
 ---
 
@@ -248,7 +264,7 @@ This single call:
     { "provider": "outlook","event_id": "AAMk...", "task_id": "task_id" }
   ],
   "calendar_event_ids": { "google": "abc123", "apple": "uuid-...", "outlook": "AAMk..." },
-  "prepared_reply": "Bonjour,\n\nMerci pour votre message..."
+  "prepared_reply": "Hello,\n\nThank you for your message..."
 }
 ```
 
@@ -256,7 +272,7 @@ Partial failures (one provider down) are logged and reported per-provider withou
 
 > **Note on re-authentication:** The `calendar` and `tasks` Google scopes were added after the initial Gmail integration. Users who connected Gmail earlier need to re-authenticate once (delete `tokens/gmail_user_<id>.json` and run the OAuth flow again).
 
-> **Note on token storage:** Gmail OAuth credentials are currently written to `tokens/gmail_user_<id>.json` on local disk. This works in local development, but ephemeral hosting can lose those files on restart or redeploy. If Gmail keeps disconnecting after deploys, move OAuth credentials to persistent storage.
+> **Note on token storage:** Gmail OAuth credentials are currently written to `tokens/gmail_user_<id>.json` on local disk. This works in local development, but ephemeral hosting can lose those files on restart or redeploy. If Gmail keeps disconnecting after deploys, move OAuth credentials to persistent storage. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for details.
 
 ---
 
@@ -306,50 +322,64 @@ irisBackend/
 │   │   │   ├── prediction.py           # POST /predict/slots — slot suggestions
 │   │   │   └── suggestion.py           # POST /suggest — AI reply draft
 │   │   └── routes/
-│   │       ├── auth_microsoft.py       # GET /auth/microsoft OAuth flow
+│   │       ├── auth.py                 # Email verification, password reset
+│   │       ├── auth_apple.py           # Apple iCloud CalDAV setup
+│   │       ├── auth_google.py          # Google OAuth callback
+│   │       ├── auth_microsoft.py       # Microsoft OAuth flow
 │   │       ├── detection.py            # POST /detect, /validate, /feedback
-│   │       └── users.py               # Auth, CRUD, calendar setup/disconnect
+│   │       └── users.py                # Auth, CRUD, calendar setup/disconnect
 │   ├── core/
 │   │   ├── auth.py                     # JWT bearer dependency (get_current_active_user)
 │   │   ├── config.py                   # All settings (DB, JWT, Google, Microsoft)
-│   │   ├── encryption.py              # Fernet encrypt/decrypt for Apple passwords
-│   │   └── security.py                # JWT creation, Argon2 password hashing
+│   │   ├── encryption.py               # Fernet encrypt/decrypt for Apple passwords
+│   │   ├── rate_limiter.py             # Sliding-window rate limiter
+│   │   └── security.py                 # JWT creation, Argon2 password hashing
 │   ├── db/
-│   │   └── database.py                # SQLAlchemy engine, session, init_db()
+│   │   └── database.py                 # SQLAlchemy engine, session, init_db()
 │   ├── models/
-│   │   ├── base.py                    # Base + TimestampMixin
-│   │   ├── user.py                    # User table (auth + calendar_providers JSON)
-│   │   ├── email.py                   # Email pipeline state machine
-│   │   └── feedback.py               # Detection correction feedback
+│   │   ├── base.py                     # Base + TimestampMixin
+│   │   ├── auth_token.py               # Email verification and password-reset tokens
+│   │   ├── user.py                     # User table (auth + calendar_providers JSON)
+│   │   ├── email.py                    # Email pipeline state machine
+│   │   └── feedback.py                 # Detection correction feedback
 │   ├── schemas/
-│   │   ├── detection.py               # ExtractionResult, TimeWindow, Participant
-│   │   ├── prediction.py              # RecommendedSlot, PredictionResponse
-│   │   ├── suggestion.py              # SuggestionResponse
-│   │   ├── email.py                   # EmailItem, FetchDetectPredictResponse
-│   │   └── user.py                   # UserCreate, UserResponse, UserUpdate
+│   │   ├── auth.py                     # ChangePasswordRequest, MessageResponse
+│   │   ├── detection.py                # ExtractionResult, TimeWindow, Participant
+│   │   ├── email.py                    # EmailItem, FetchDetectPredictResponse
+│   │   ├── prediction.py               # RecommendedSlot, PredictionResponse
+│   │   ├── suggestion.py               # SuggestionResponse
+│   │   └── user.py                     # UserCreate, UserResponse, UserUpdate
 │   ├── services/
-│   │   ├── detection.py              # NLP detection + LLM fallback orchestration
-│   │   ├── prediction_service.py     # Slot scoring, working hours, timezone
-│   │   ├── gmail_service.py          # Gmail OAuth, token management, email fetch
-│   │   ├── google_calendar_service.py # Google Calendar API (reuses Gmail token)
-│   │   ├── google_tasks_service.py   # Google Tasks API (reuses Gmail token)
-│   │   ├── apple_calendar_service.py  # Apple iCloud CalDAV + App Password
-│   │   ├── microsoft_oauth_service.py # MS OAuth2 token storage/refresh via httpx
+│   │   ├── detection.py                # NLP detection + LLM fallback orchestration
+│   │   ├── prediction_service.py       # Slot scoring, working hours, timezone
+│   │   ├── gmail_service.py            # Gmail OAuth, token management, email fetch
+│   │   ├── google_calendar_service.py  # Google Calendar API (reuses Gmail token)
+│   │   ├── google_tasks_service.py     # Google Tasks API (reuses Gmail token)
+│   │   ├── apple_calendar_service.py   # Apple iCloud CalDAV + App Password
+│   │   ├── microsoft_oauth_service.py  # MS OAuth2 token storage/refresh via httpx
 │   │   ├── outlook_calendar_service.py # Microsoft Graph API — calendar events
-│   │   ├── outlook_tasks_service.py   # Microsoft Graph API — To Do tasks
-│   │   ├── openai_service.py          # OpenAI GPT reply generation (mock → real)
-│   │   └── suggestion_service.py     # Reply draft formatter
+│   │   ├── outlook_tasks_service.py    # Microsoft Graph API — To Do tasks
+│   │   ├── outlook_email_service.py    # Outlook email fetch
+│   │   ├── openai_service.py           # OpenAI GPT reply generation (mock → real)
+│   │   ├── suggestion_service.py       # Reply draft formatter
+│   │   ├── auth_token_service.py       # Token creation/consumption for auth flows
+│   │   └── email_service.py            # SMTP email sending
 │   ├── nlp/
-│   │   ├── extractor.py              # Regex + dateparser NLP engine
-│   │   └── llm_fallback_openai.py    # GPT fallback when NLP confidence < 0.6
-│   └── main.py                       # FastAPI app, router registration, CORS
-├── tests/                             # pytest test suite
-├── tokens/                            # Per-user OAuth token files (gitignored)
+│   │   ├── extractor.py                # Regex + dateparser NLP engine
+│   │   └── llm_fallback_openai.py      # GPT fallback when NLP confidence < 0.6
+│   └── main.py                         # FastAPI app, router registration, CORS
+├── tests/                              # pytest test suite
+├── docs/                               # Integration setup guides
+│   ├── GOOGLE_OAUTH_SETUP.md
+│   ├── APPLE_CALENDAR_SETUP.md
+│   ├── MICROSOFT_OAUTH_SETUP.md
+│   └── DEPLOYMENT.md
+├── tokens/                             # Per-user OAuth token files (gitignored)
 │   ├── gmail_user_<id>.json
 │   └── outlook_user_<id>.json
-├── .github/workflows/                 # CI/CD pipelines
-├── docker-compose.yml                 # PostgreSQL + API containers
-└── pyproject.toml                     # Poetry dependencies + tool config
+├── .github/workflows/                  # CI/CD pipelines
+├── docker-compose.yml                  # PostgreSQL + API containers
+└── pyproject.toml                      # Poetry dependencies + tool config
 ```
 
 ---
@@ -361,6 +391,17 @@ irisBackend/
 - Tests required for all new features
 - `poetry run ruff check app/` — lint
 - `poetry run mypy app/` — type check
+
+---
+
+## Integration Setup Guides
+
+Third-party integrations have dedicated step-by-step setup docs in the [`docs/`](docs/) folder:
+
+- [Google OAuth (Gmail + Calendar + Tasks)](docs/GOOGLE_OAUTH_SETUP.md)
+- [Apple Calendar (iCloud CalDAV + App Password)](docs/APPLE_CALENDAR_SETUP.md)
+- [Microsoft / Outlook (Azure App Registration)](docs/MICROSOFT_OAUTH_SETUP.md)
+- [Production Deployment on Render](docs/DEPLOYMENT.md)
 
 ---
 

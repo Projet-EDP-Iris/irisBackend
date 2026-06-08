@@ -1,11 +1,9 @@
+import logging
 import os
 
-import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 
-# Imports des routers
 from app.api.endpoints.calendar import router as calendar_router
 from app.api.endpoints.emails import router as email_router
 from app.api.endpoints.prediction import router as prediction_router
@@ -20,10 +18,10 @@ from app.core.config import settings
 from app.db.database import engine, init_db
 from app.models import Base
 
-# 1. Création des tables
+logger = logging.getLogger(__name__)
+
 Base.metadata.create_all(bind=engine)
 
-# 2. Configuration de l'application
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description=(
@@ -49,12 +47,12 @@ app = FastAPI(
     ],
 )
 
-# 3. Middleware CORS
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:3000",
     "http://localhost:8080",
     "https://one-page-site-nine.vercel.app",
+    "https://one-page-site-ten.vercel.app",
     "null",  # Packaged Electron .exe loads from file://, which sends Origin: null
 ]
 
@@ -73,7 +71,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 4. Événement de démarrage
+
 @app.on_event("startup")
 def startup_event():
     init_db()
@@ -82,10 +80,10 @@ def startup_event():
     try:
         from app.services.detection import _get_extractor
         _get_extractor()
-    except Exception:
-        pass  # Never block startup if model loading fails
+    except Exception as exc:
+        logger.warning("spaCy model failed to pre-warm: %s", exc)
 
-# 5. Inclusion des Routes
+
 app.include_router(user_router, prefix="/api/v1", tags=["users"])
 app.include_router(detection_router, prefix="/api/v1", tags=["detection"])
 app.include_router(email_router, prefix="/api/v1", tags=["emails"])
@@ -97,18 +95,17 @@ app.include_router(apple_auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(google_auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(microsoft_auth_router, prefix="/api/v1", tags=["auth"])
 
-# 6. Fichiers statiques
-if os.path.exists("app/static"):
-    app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
-# 7. Endpoints de base
 @app.get("/", tags=["system"])
 async def root():
-    return {"message": "Bienvenue sur l'API Iris - Le pipeline est opérationnel !"}
+    return {"message": "Iris API — pipeline is operational"}
+
 
 @app.get("/health", tags=["system"])
 async def health_check():
     return {"status": "healthy"}
 
+
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)  # nosec B104

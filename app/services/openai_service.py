@@ -3,28 +3,22 @@ import random
 
 
 async def generate_mail_suggestions(summary: str):
-    """
-    VERSION TEST (MOCK) : Simule l'appel à GPT-5.4 Mini.
-    Permet de tester le Frontend et le Backend sans clé API.
-    """
-    # On simule un petit délai réseau de 0.8 seconde pour faire "vrai" lors de la démo
+    """Return three mock reply variants for the given email summary."""
     await asyncio.sleep(0.8)
 
-    # Liste de templates pour varier un peu les tests
     templates = [
         {
-            "amical": f"Coucou ! Pour {summary}, ça me va carrément. On s'organise comment ?",
-            "formel": f"Bonjour, j'accuse réception de votre message concernant {summary}. Je reviens vers vous avec une proposition concrète.",
-            "court": "Bien reçu. On fait comme ça !"
+            "amical": f"Hey! Works for me regarding {summary}. How do you want to organise it?",
+            "formel": f"Dear Sir/Madam, I acknowledge your message regarding {summary}. I will follow up with a concrete proposal.",
+            "court": "Got it. Let's do that!"
         },
         {
-            "amical": f"Salut ! Super idée pour {summary}. Je suis dispo si tu veux en parler.",
-            "formel": f"Madame, Monsieur, suite à notre échange sur {summary}, je vous confirme mon accord pour la suite des opérations.",
-            "court": "C'est noté, merci."
+            "amical": f"Hi! Great idea about {summary}. I'm available if you'd like to discuss.",
+            "formel": f"Dear Sir/Madam, further to our exchange on {summary}, I confirm my agreement to proceed.",
+            "court": "Noted, thanks."
         }
     ]
 
-    # On choisit un set de réponses au hasard
     chosen = random.choice(templates)
 
     return [

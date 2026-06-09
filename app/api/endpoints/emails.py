@@ -3,7 +3,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime as _parsedate
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+import re as _re
+
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -63,11 +65,14 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
                 existing.provider = item.provider
             if not existing.sender and item.sender:
                 existing.sender = item.sender
+            if not existing.rfc_message_id and item.rfc_message_id:
+                existing.rfc_message_id = item.rfc_message_id
         else:
             db_email = Email(
                 subject=item.subject,
                 body=item.body,
                 message_id=item.message_id,
+                rfc_message_id=item.rfc_message_id,
                 user_id=user_id,
                 status="fetched",
                 sender=item.sender,
@@ -92,6 +97,7 @@ def _get_gmail_emails(user_id: int, max_results: int | None = None) -> list[Emai
             subject=r["subject"],
             body=r["body"],
             message_id=r["message_id"],
+            rfc_message_id=r.get("rfc_message_id"),
             sender=r.get("sender"),
             date=r.get("date"),
             provider="gmail",
@@ -292,6 +298,7 @@ def get_cached_emails(
             subject=row.subject or "",
             body=row.body or "",
             message_id=row.message_id,
+            rfc_message_id=row.rfc_message_id,
             sender=row.sender,
             db_id=row.id,
             category=row.category or "info",
@@ -341,6 +348,7 @@ def get_email_feed(
                 subject=r["subject"],
                 body=r["body"],
                 message_id=r["message_id"],
+                rfc_message_id=r.get("rfc_message_id"),
                 sender=r.get("sender"),
                 date=r.get("date"),
                 category=existing_categories.get(r.get("message_id"), None),
@@ -411,6 +419,7 @@ def sync_user_emails_background(user_id: int) -> None:
                         subject=r["subject"],
                         body=r["body"],
                         message_id=r["message_id"],
+                        rfc_message_id=r.get("rfc_message_id"),
                         sender=r.get("sender"),
                         date=r.get("date"),
                         category=categorize_email(DetectionEmailInput(subject=r["subject"], body=r["body"])),
@@ -474,3 +483,52 @@ async def summarize_email(
     from app.services.openai_service import generate_summary
     summary = await generate_summary(req.subject, req.body)
     return _SummarizeResponse(summary=summary)
+
+
+@router.post("/emails/reply/{email_id}")
+async def send_email_reply(
+    email_id: int,
+    reply_text: str = Form(...),
+    attachments: list[UploadFile] = File(default=[]),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Send a reply to an email via Resend.
+
+    Accepts multipart/form-data with reply_text (required) and optional file attachments.
+    Sets In-Reply-To and References headers from the stored rfc_message_id so the reply
+    threads correctly in the recipient's mail client.
+    """
+    from app.services.resend_service import ReplyRequest, send_reply
+
+    record = db.query(Email).filter(
+        Email.id == email_id, Email.user_id == current_user.id
+    ).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Email not found")
+    if not record.sender:
+        raise HTTPException(status_code=400, detail="Original sender address unknown")
+
+    addr_match = _re.search(r"<([^>]+)>", record.sender)
+    to_address = addr_match.group(1) if addr_match else record.sender
+
+    attachment_tuples: list[tuple[str, bytes]] = [
+        (u.filename or "attachment", await u.read()) for u in attachments
+    ]
+
+    try:
+        sent_id = send_reply(ReplyRequest(
+            to=to_address,
+            subject=record.subject or "",
+            text=reply_text,
+            rfc_message_id=record.rfc_message_id,
+            attachments=attachment_tuples,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Resend error for email_id=%d", email_id)
+        raise HTTPException(status_code=502, detail=f"Email delivery failed: {exc}")
+
+    return {"status": "sent", "resend_id": sent_id}

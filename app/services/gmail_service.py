@@ -245,6 +245,7 @@ class GmailService:
                 subject = next((h["value"] for h in headers if h["name"] == "Subject"), "")
                 sender = next((h["value"] for h in headers if h["name"] == "From"), "")
                 date = next((h["value"] for h in headers if h["name"] == "Date"), "")
+                rfc_msg_id = next((h["value"] for h in headers if h["name"].lower() == "message-id"), None)
                 snippet = msg.get("snippet", "")
                 email_data.append({
                     "subject": subject,
@@ -252,6 +253,7 @@ class GmailService:
                     "date": date,
                     "body": snippet,
                     "message_id": stub["id"],
+                    "rfc_message_id": rfc_msg_id,
                 })
             return email_data, next_token
         except Exception:
@@ -309,12 +311,14 @@ class GmailService:
                 subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
                 sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
                 date = next((h["value"] for h in headers if h["name"] == "Date"), "Unknown Date")
+                rfc_msg_id = next((h["value"] for h in headers if h["name"].lower() == "message-id"), None)
                 body = _extract_body_from_payload(payload, snippet)
                 message_id = msg.get("id", "")
                 email_data.append({
                     "subject": subject,
                     "body": body,
                     "message_id": message_id,
+                    "rfc_message_id": rfc_msg_id,
                     "sender": sender,
                     "date": date,
                 })

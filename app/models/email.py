@@ -42,3 +42,6 @@ class Email(Base):
     # Calendar integration
     calendar_event_id = Column(String, nullable=True)
     calendar_event_ids = Column(JSON, nullable=True)
+
+    # RFC 2822 Message-ID header — used for email threading (In-Reply-To / References)
+    rfc_message_id = Column(String, nullable=True)

@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 
 # Fields we request from the Graph API (minimise payload)
-_SELECT = "id,subject,body,from,receivedDateTime,isRead,isDraft"
+_SELECT = "id,subject,body,from,receivedDateTime,isRead,isDraft,internetMessageId"
 
 
 def is_outlook_connected(user_id: int) -> bool:
@@ -57,6 +57,9 @@ def _parse_email_item(msg: dict) -> EmailItem:
     # Use the Graph message id as our message_id (stable per message)
     message_id = msg.get("id")
 
+    # RFC 2822 Message-ID header — Graph returns this as internetMessageId
+    rfc_message_id = msg.get("internetMessageId")
+
     # Import here to avoid circular import (detection → extractor, not outlook → detection)
     from app.services.detection import categorize_email  # noqa: PLC0415
     category = categorize_email(DetectionEmailInput(subject=subject, body=body))
@@ -65,6 +68,7 @@ def _parse_email_item(msg: dict) -> EmailItem:
         subject=subject,
         body=body,
         message_id=message_id,
+        rfc_message_id=rfc_message_id,
         sender=sender,
         date=date,
         category=category,

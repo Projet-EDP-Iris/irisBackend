@@ -3316,6 +3316,18 @@ pycryptodome = ["pycryptodome (>=3.3.1,<4.0.0)"]
 test = ["pytest", "pytest-cov"]
 
 [[package]]
+name = "python-multipart"
+version = "0.0.32"
+description = "A streaming multipart parser for Python"
+optional = false
+python-versions = ">=3.10"
+groups = ["main"]
+files = [
+    {file = "python_multipart-0.0.32-py3-none-any.whl", hash = "sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23"},
+    {file = "python_multipart-0.0.32.tar.gz", hash = "sha256:be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e"},
+]
+
+[[package]]
 name = "pytz"
 version = "2026.1.post1"
 description = "World timezone definitions, modern and historical"
@@ -3723,6 +3735,25 @@ requests = ">=2.0.0"
 
 [package.extras]
 rsa = ["oauthlib[signedtoken] (>=3.0.0)"]
+
+[[package]]
+name = "resend"
+version = "2.30.1"
+description = "Resend Python SDK"
+optional = false
+python-versions = ">=3.7"
+groups = ["main"]
+files = [
+    {file = "resend-2.30.1-py2.py3-none-any.whl", hash = "sha256:45da25b86940307e130f8a44d2bac889574362400843e9cd98b49b79a7b3db63"},
+    {file = "resend-2.30.1.tar.gz", hash = "sha256:a529a019e83be285d855ecf135475dc6a6b9fa1c24f9b710686988e021a535ec"},
+]
+
+[package.dependencies]
+requests = ">=2.31.0"
+typing-extensions = ">=4.4.0"
+
+[package.extras]
+async = ["httpx (>=0.24.0)"]
 
 [[package]]
 name = "rich"
@@ -4693,4 +4724,4 @@ tzdata = "*"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "062acfc954fe9cc53b7e42918cc8a21c023c85ba27c7816baf63c1dd03aee044"
+content-hash = "b73c41fc65c1d52028cd1f1c0e04dfb5d69da7fae54a49de323c44a058c987df"

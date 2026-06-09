@@ -1,8 +1,11 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime as _parsedate
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
+import re as _re
+
+from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -19,7 +22,7 @@ from app.schemas.email import (
     FetchDetectPredictResponse,
 )
 from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
-from app.services.detection import categorize_email, detect_batch
+from app.services.detection import categorize_email, detect_batch, enrich_batch
 from app.services.gmail_service import GmailService
 from app.services.outlook_email_service import (
     fetch_outlook_email_page,
@@ -62,11 +65,14 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
                 existing.provider = item.provider
             if not existing.sender and item.sender:
                 existing.sender = item.sender
+            if not existing.rfc_message_id and item.rfc_message_id:
+                existing.rfc_message_id = item.rfc_message_id
         else:
             db_email = Email(
                 subject=item.subject,
                 body=item.body,
                 message_id=item.message_id,
+                rfc_message_id=item.rfc_message_id,
                 user_id=user_id,
                 status="fetched",
                 sender=item.sender,
@@ -91,11 +97,9 @@ def _get_gmail_emails(user_id: int, max_results: int | None = None) -> list[Emai
             subject=r["subject"],
             body=r["body"],
             message_id=r["message_id"],
+            rfc_message_id=r.get("rfc_message_id"),
             sender=r.get("sender"),
             date=r.get("date"),
-            category=categorize_email(
-                DetectionEmailInput(subject=r["subject"], body=r["body"])
-            ),
             provider="gmail",
         )
         for r in raw
@@ -164,6 +168,17 @@ def get_emails(
     Returns HTTP 404 if neither Gmail nor Outlook is connected.
     """
     items = _get_all_emails_for_user(current_user.id, max_results=max_results)
+    if items:
+        with ThreadPoolExecutor(max_workers=min(8, len(items))) as executor:
+            futures = {
+                executor.submit(
+                    categorize_email,
+                    DetectionEmailInput(subject=it.subject, body=it.body, sender=it.sender or ""),
+                ): i
+                for i, it in enumerate(items)
+            }
+            for future in _as_completed(futures):
+                items[futures[future]].category = future.result()
     _upsert_email_items(db, current_user.id, items)
     return items
 
@@ -178,11 +193,8 @@ def post_fetch_and_detect(
     Returns HTTP 404 if no email provider is connected.
     """
     email_items = _get_all_emails_for_user(current_user.id, max_results=max_results)
-
-    # Build EmailInput objects for detection
-    from app.schemas.detection import EmailInput  # local import to avoid circular
     email_inputs = [
-        EmailInput(
+        DetectionEmailInput(
             subject=e.subject,
             body=e.body,
             message_id=e.message_id or "",
@@ -200,34 +212,49 @@ class FetchDetectPredictBody(BaseModel):
 
 
 @router.post("/emails/fetch-detect-predict", response_model=FetchDetectPredictResponse)
-def post_fetch_detect_predict(
+async def post_fetch_detect_predict(
     max_results: int | None = None,
     body: FetchDetectPredictBody | None = Body(None),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> FetchDetectPredictResponse:
     """
-    Fetch emails (Gmail + Outlook), run detection, then prediction.
+    Fetch emails (Gmail + Outlook), run detection + async enrichment, then prediction.
     Returns HTTP 404 if no email provider is connected.
     """
-    email_items = _get_all_emails_for_user(current_user.id, max_results=max_results)
+    import asyncio
 
-    from app.schemas.detection import EmailInput
+    from app.nlp.extractor import classification_to_category
+
+    email_items = await asyncio.to_thread(
+        _get_all_emails_for_user, current_user.id, max_results
+    )
     email_inputs = [
-        EmailInput(
+        DetectionEmailInput(
             subject=e.subject,
             body=e.body,
             message_id=e.message_id or "",
+            sender=e.sender or "",
         )
         for e in email_items
     ]
-    extractions = detect_batch(email_inputs)
+
+    # Sync phase: regex + spaCy + sync LLM meeting-metadata enhance
+    extractions = await asyncio.to_thread(detect_batch, email_inputs)
+
+    # Async enrichment: LLM category for ambiguous emails + auto-reply drafts
+    await enrich_batch(email_items, extractions)
+
+    # Propagate enriched classifications back to EmailItem.category
+    for item, ext in zip(email_items, extractions):
+        item.category = classification_to_category(ext.classification)
+
     extraction = extractions[0] if extractions else ExtractionResult()
     prefs = body.preferences if body else None
     cal = body.calendar if body else None
     suggested_slots = get_suggested_slots(extraction, preferences=prefs, calendar=cal)
 
-    _upsert_email_items(db, current_user.id, email_items)
+    await asyncio.to_thread(_upsert_email_items, db, current_user.id, email_items)
 
     # Store predicted slots on the first email's DB record
     if email_items and email_items[0].db_id and suggested_slots:
@@ -271,6 +298,7 @@ def get_cached_emails(
             subject=row.subject or "",
             body=row.body or "",
             message_id=row.message_id,
+            rfc_message_id=row.rfc_message_id,
             sender=row.sender,
             db_id=row.id,
             category=row.category or "info",
@@ -294,8 +322,6 @@ def get_email_feed(
     Paginated email feed for infinite scroll.
     Fetches one page from Gmail (batch, metadata + snippet) and one page from Outlook.
     """
-    from app.schemas.detection import EmailInput as _DetectionInput
-
     # Pre-fetch known message IDs + stored categories to skip NLP for already-categorised emails.
     existing_categories: dict[str, str] = {
         row.message_id: (row.category or "info")
@@ -310,20 +336,22 @@ def get_email_feed(
     gmail_next_cursor: str | None = None
 
     svc = GmailService()
-    if svc.authenticate_for_user(current_user.id):
+    try:
+        gmail_ok = svc.authenticate_for_user(current_user.id)
+    except Exception as exc:
+        logger.warning("Gmail auth failed for user %d: %s", current_user.id, exc)
+        gmail_ok = False
+    if gmail_ok:
         raw_list, gmail_next_cursor = svc.fetch_email_page(page_token=gmail_cursor, limit=limit)
         gmail_emails = [
             EmailItem(
                 subject=r["subject"],
                 body=r["body"],
                 message_id=r["message_id"],
+                rfc_message_id=r.get("rfc_message_id"),
                 sender=r.get("sender"),
                 date=r.get("date"),
-                category=(
-                    categorize_email(_DetectionInput(subject=r["subject"], body=r["body"]))
-                    if r.get("message_id") not in existing_ids
-                    else existing_categories.get(r.get("message_id"), "info")
-                ),
+                category=existing_categories.get(r.get("message_id"), None),
                 provider="gmail",
             )
             for r in raw_list
@@ -347,6 +375,21 @@ def get_email_feed(
     all_emails = gmail_emails + outlook_emails
     all_emails.sort(key=lambda e: _sort_key(e.date), reverse=True)
 
+    uncategorized = [(i, it) for i, it in enumerate(all_emails) if not it.category]
+    if uncategorized:
+        with ThreadPoolExecutor(max_workers=min(8, len(uncategorized))) as executor:
+            futures = {
+                executor.submit(categorize_email, DetectionEmailInput(subject=it.subject, body=it.body)): i
+                for i, it in uncategorized
+            }
+            for future in _as_completed(futures):
+                idx = futures[future]
+                try:
+                    all_emails[idx].category = future.result()
+                except Exception as exc:
+                    logger.warning("categorize_email failed for email %d: %s", idx, exc)
+                    all_emails[idx].category = "info"
+
     has_more = (gmail_next_cursor is not None) or outlook_has_more
 
     _upsert_email_items(db, current_user.id, all_emails)
@@ -364,7 +407,6 @@ def sync_user_emails_background(user_id: int) -> None:
     Called as a FastAPI BackgroundTask after OAuth so the DB is populated before
     the frontend's next /emails/cached or /emails/feed poll."""
     from app.db.database import SessionLocal  # local import — runs in background thread
-    from app.schemas.detection import EmailInput  # noqa: PLC0414
     db = SessionLocal()
     try:
         items: list[EmailItem] = []
@@ -377,9 +419,10 @@ def sync_user_emails_background(user_id: int) -> None:
                         subject=r["subject"],
                         body=r["body"],
                         message_id=r["message_id"],
+                        rfc_message_id=r.get("rfc_message_id"),
                         sender=r.get("sender"),
                         date=r.get("date"),
-                        category=categorize_email(EmailInput(subject=r["subject"], body=r["body"])),
+                        category=categorize_email(DetectionEmailInput(subject=r["subject"], body=r["body"])),
                         provider="gmail",
                     )
                     for r in raw_list
@@ -416,3 +459,76 @@ def get_email_body(
         body = svc.fetch_email_body(message_id)
         return {"body": body}
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider")
+
+
+class _SummarizeRequest(BaseModel):
+    subject: str = ""
+    body: str = ""
+
+
+class _SummarizeResponse(BaseModel):
+    summary: str
+
+
+@router.post("/emails/summarize", response_model=_SummarizeResponse)
+async def summarize_email(
+    req: _SummarizeRequest,
+    _: User = Depends(get_current_active_user),
+) -> _SummarizeResponse:
+    """Generate a 2–3 sentence AI summary of an email.
+
+    Detects the email language and writes the summary in that language.
+    Requires OPENAI_API_KEY to be configured; returns an empty summary otherwise.
+    """
+    from app.services.openai_service import generate_summary
+    summary = await generate_summary(req.subject, req.body)
+    return _SummarizeResponse(summary=summary)
+
+
+@router.post("/emails/reply/{email_id}")
+async def send_email_reply(
+    email_id: int,
+    reply_text: str = Form(...),
+    attachments: list[UploadFile] = File(default=[]),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """
+    Send a reply to an email via Resend.
+
+    Accepts multipart/form-data with reply_text (required) and optional file attachments.
+    Sets In-Reply-To and References headers from the stored rfc_message_id so the reply
+    threads correctly in the recipient's mail client.
+    """
+    from app.services.resend_service import ReplyRequest, send_reply
+
+    record = db.query(Email).filter(
+        Email.id == email_id, Email.user_id == current_user.id
+    ).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Email not found")
+    if not record.sender:
+        raise HTTPException(status_code=400, detail="Original sender address unknown")
+
+    addr_match = _re.search(r"<([^>]+)>", record.sender)
+    to_address = addr_match.group(1) if addr_match else record.sender
+
+    attachment_tuples: list[tuple[str, bytes]] = [
+        (u.filename or "attachment", await u.read()) for u in attachments
+    ]
+
+    try:
+        sent_id = send_reply(ReplyRequest(
+            to=to_address,
+            subject=record.subject or "",
+            text=reply_text,
+            rfc_message_id=record.rfc_message_id,
+            attachments=attachment_tuples,
+        ))
+    except ValueError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        logger.exception("Resend error for email_id=%d", email_id)
+        raise HTTPException(status_code=502, detail=f"Email delivery failed: {exc}")
+
+    return {"status": "sent", "resend_id": sent_id}

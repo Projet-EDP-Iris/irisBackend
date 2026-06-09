@@ -75,6 +75,9 @@ def init_db():
 
             # Migrate from global unique on message_id → composite unique per (message_id, user_id).
             # Drop the old single-column index (may or may not exist depending on deployment age).
+            if "rfc_message_id" not in email_columns:
+                connection.execute(text("ALTER TABLE emails ADD COLUMN rfc_message_id VARCHAR(998)"))
+
             connection.execute(text("DROP INDEX IF EXISTS ix_emails_message_id"))
             connection.execute(text(
                 "CREATE UNIQUE INDEX IF NOT EXISTS uq_emails_message_id_user "

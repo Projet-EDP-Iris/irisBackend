@@ -1,6 +1,38 @@
+"""
+Two-layer email classification pipeline.
+
+Layer 1 — Regex (fast, deterministic):
+  Ordered regex patterns cover the six categories below in priority order.
+  A match short-circuits further evaluation. Confidence scores reflect how
+  strongly the pattern signals the category (0.65 – 0.9).
+
+  Priority order (highest to lowest):
+    meeting_cancel  → CANCEL_EN     (0.9)
+    meeting_reschedule → RESCHEDULE_EN (0.85)
+    meeting_schedule   → SCHEDULE_EN   (0.8)
+    bonsplans          → BONSPLANS_RE  (0.75)
+    attente            → ATTENTE_RE    (0.7)
+    action             → ACTION_RE     (0.7)
+    info               → INFO_RE       (0.65)
+
+Layer 2 — spaCy NER + morphology (slower, handles edge cases):
+  Runs only when no regex matched. Inspects the first 600 characters for
+  named entities, imperative verb moods, and question density to make a
+  lower-confidence classification (0.3 – 0.6).
+
+  Fallback when spaCy is unavailable or raises: returns ("info", 0.3).
+
+After classification, meeting-type emails extract additional metadata
+(proposed times via dateparser, duration, timezone, meeting link, modality,
+participants). Non-meeting emails skip this step for performance.
+
+Frontend mapping: classification_to_category() maps the seven internal values
+to the five UI tab IDs: rdv / action / attente / bonsplans / info.
+"""
 import re
 from datetime import datetime
 
+from app.core.config import settings
 from app.schemas.detection import (
     Classification,
     EmailInput,
@@ -16,10 +48,24 @@ SCHEDULE_EN = re.compile(
     r"rendez-vous\s+(?:le\s+\d|à\s+\d{1,2}[h:]|avec|prévu|confirmé|téléphonique)|"
     r"schedule\s+a\s+(?:call|meeting|time|sync)|"
     r"book\s+a\s+(?:call|meeting|slot|time)|"
-    r"hop\s+on\s+a\s+call|let.s\s+meet|meet\s+(?:on|at|up)|"
+    r"set\s+up\s+a\s+(?:call|meeting|time|sync)|find\s+a\s+time|"
+    r"hop\s+on\s+a\s+(?:call|zoom|teams|meet)|let.s\s+(?:meet|chat|sync|catch\s+up)|"
+    r"meet\s+(?:on|at|up)|catch[\s-]?up|"
     r"call\s+(?:at|on|scheduled|tomorrow|next\s+week)|"
+    r"quick\s+(?:call|chat|sync)|petit\s+(?:appel|point|call)|call\s+rapide|"
+    r"on\s+se\s+retrouve|faire\s+(?:un|le)\s+point|point\s+de\s+(?:situation|suivi)|"
+    r"sync(?:hronisation)?|convocation|invitation\s+(?:à\s+la\s+)?réunion|"
+    r"coffee\s+chat|virtual\s+coffee|grab\s+a\s+coffee|"
     r"(?:lundi|mardi|mercredi|jeudi|vendredi)\s+(?:prochain|à\s+\d{1,2}[h:]\d{0,2}|\d{1,2}[h:]\d{0,2}|matin|soir|après-midi|midi)|"
-    r"(?:monday|tuesday|wednesday|thursday|friday)\s+(?:at\s+\d{1,2}|next|morning|afternoon|evening))\b",
+    r"(?:monday|tuesday|wednesday|thursday|friday)\s+(?:at\s+\d{1,2}|next|morning|afternoon|evening)|"
+    r"dispo\s+(?:lundi|mardi|mercredi|jeudi|vendredi|ce\s+soir|demain|la\s+semaine)|"
+    r"tu\s+es\s+(?:dispo|libre|disponible)|"
+    r"vous\s+êtes\s+(?:dispo|libre|disponible)|"
+    r"on\s+se\s+voit\s+(?:quand|demain|lundi|mardi|mercredi|jeudi|vendredi)|"
+    r"ça\s+te\s+va\s+(?:lundi|mardi|mercredi|jeudi|vendredi|pour|demain)|"
+    r"libre\s+(?:lundi|mardi|mercredi|jeudi|vendredi|demain|ce\s+soir)|"
+    r"are\s+you\s+(?:free|available)\s+(?:on|this|next)|"
+    r"(?:free|available)\s+(?:monday|tuesday|wednesday|thursday|friday|tomorrow))\b",
     re.IGNORECASE,
 )
 CANCEL_EN = re.compile(
@@ -34,18 +80,25 @@ RESCHEDULE_EN = re.compile(
     re.IGNORECASE,
 )
 BONSPLANS_RE = re.compile(
-    r"\b(promo|promotion|offre\s+sp[eé]ciale|bon\s+plan|r[eé]duction|rabais|soldes?|"
+    r"\b(promo|promotion|offre\s+sp[eé]ciale|offre\s+exclusive|bon\s+plan|r[eé]duction|rabais|soldes?|"
     r"vente\s+priv[eé]e|flash\s+sale|deal|discount|coupon|code\s+promo|voucher|"
     r"uber\s*eats|deliveroo|just\s*eat|\d{1,3}\s*%\s*off|\d{1,3}\s*%\s*de\s*r[eé]duction|"
+    r"jusqu.[àa]\s+\d{1,3}\s*%|[eé]conomisez|cashback|livraison\s+offerte|"
     r"gratuit|free\s+trial|essai\s+gratuit|limited\s+time|offre\s+limit[eé]e|"
-    r"black\s+friday|cyber\s+monday|prime\s+day)\b",
+    r"valable\s+jusqu|points?\s+fid[eé]lit[eé]|membres?\s+exclusifs?|r[eé]compenses?|"
+    r"save\s+\d+|special\s+offer|exclusive\s+offer|"
+    r"black\s+friday|cyber\s+monday|prime\s+day|nos\s+offres)\b",
     re.IGNORECASE,
 )
 ATTENTE_RE = re.compile(
     r"\b(follow[- ]?up|relance|en\s+attente\s+de|waiting\s+for\s+your|"
     r"j.attends\s+(?:votre|ta)|I.m\s+waiting|haven.t\s+heard|toujours\s+en\s+attente|"
     r"still\s+waiting|awaiting\s+your|pending\s+your|dans\s+l.attente\s+de|"
-    r"avez-vous\s+eu\s+le\s+temps|did\s+you\s+have\s+a\s+chance|any\s+update)\b",
+    r"avez-vous\s+eu\s+le\s+temps|did\s+you\s+have\s+a\s+chance|any\s+update|"
+    r"sans\s+nouvelles?\s+de|juste\s+pour\s+v[eé]rifier|tu\s+as\s+vu\s+mon|"
+    r"est-ce\s+que\s+tu\s+peux\s+confirmer|me\s+permets?\s+de\s+(?:te\s+)?relancer|"
+    r"un\s+petit\s+rappel|reminder|pas\s+encore\s+re[cç]u|sans\s+r[eé]ponse|"
+    r"not\s+yet\s+received|just\s+a\s+reminder|checking\s+in)\b",
     re.IGNORECASE,
 )
 ACTION_RE = re.compile(
@@ -54,10 +107,49 @@ ACTION_RE = re.compile(
     r"please\s+(?:reply|respond|confirm|review|sign|approve|send|fill|complete|provide)|"
     r"pouvez-vous|pourriez-vous|could\s+you|would\s+you\s+(?:mind|please)|"
     r"je\s+vous\s+(?:demande|sollicite|prie)|your\s+(?:approval|signature|feedback|input)|"
-    r"deadline|[àa]\s+faire|[àa]\s+valider|[àa]\s+signer|[àa]\s+retourner|"
-    r"r[eé]pondez\s+avant|respond\s+by|due\s+(?:date|by|on))\b",
+    r"deadline|[àa]\s+faire|[àa]\s+valider|[àa]\s+signer|[àa]\s+retourner|[àa]\s+compl[eé]ter|"
+    r"r[eé]pondez\s+avant|respond\s+by|due\s+(?:date|by|on)|"
+    r"formulaire\s+[àa]\s+remplir|veuillez\s+(?:remplir|confirmer|valider|signer|envoyer|noter)|"
+    r"n.oubliez\s+pas\s+de|action\s+de\s+(?:ta|votre)\s+part|"
+    r"besoin\s+de\s+(?:ta|votre)\s+r[eé]ponse|update\s+required|must\s+be\s+(?:done|completed)|"
+    r"document\s+[àa]\s+signer|avant\s+le\s+\d)\b",
     re.IGNORECASE,
 )
+INFO_RE = re.compile(
+    r"\b(newsletter|bulletin\s+(?:d.information|mensuel|hebdomadaire)|"
+    r"rapport\s+(?:mensuel|hebdomadaire|annuel|de\s+suivi|d.activit[eé])|"
+    r"compte[\s-]rendu|r[eé]sum[eé]\s+(?:de\s+la\s+semaine|du\s+mois|de\s+r[eé]union)|"
+    r"mise\s+[àa]\s+jour\s+(?:du\s+projet|de\s+la\s+situation)|note\s+interne|"
+    r"pour\s+(?:votre\s+)?information|FYI|for\s+your\s+(?:information|records)|"
+    r"ci-joint\s+(?:le|la|les|notre|votre)|veuillez\s+trouver\s+ci-joint|"
+    r"digest\s+(?:de|du)|weekly\s+(?:digest|update|summary)|monthly\s+(?:report|summary)|"
+    r"no\s+action\s+(?:required|needed)|aucune\s+action\s+(?:requise|n[eé]cessaire)|"
+    r"à\s+titre\s+d.information)\b",
+    re.IGNORECASE,
+)
+# Weights and ordered pattern list for the scoring matrix.
+# Higher weight = stronger evidence signal for that category.
+# cancel/reschedule intentionally outweigh schedule to avoid false positives
+# when a cancellation email also contains a "reschedule later" phrase.
+_CATEGORY_WEIGHTS: dict[str, float] = {
+    "meeting_cancel":     3.0,
+    "meeting_reschedule": 2.5,
+    "meeting_schedule":   2.0,
+    "bonsplans":          1.5,
+    "attente":            1.5,
+    "action":             1.5,
+    "info":               1.0,
+}
+_CATEGORY_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("meeting_cancel",     CANCEL_EN),
+    ("meeting_reschedule", RESCHEDULE_EN),
+    ("meeting_schedule",   SCHEDULE_EN),
+    ("bonsplans",          BONSPLANS_RE),
+    ("attente",            ATTENTE_RE),
+    ("action",             ACTION_RE),
+    ("info",               INFO_RE),
+]
+
 DURATION_RE = re.compile(
     r"(\d+)\s*(?:min(?:ute)?s?|h(?:our)?s?|hrs?)\b",
     re.IGNORECASE,
@@ -128,27 +220,74 @@ def _classify_with_spacy(text: str, nlp) -> tuple[str, float]:
     return "info", 0.3
 
 
-def _classify(text: str, nlp=None) -> tuple[Classification, float]:
-    # Layer 1: Regex — fast, high-confidence keyword matching
-    if CANCEL_EN.search(text):
-        return "meeting_cancel", 0.9
-    if RESCHEDULE_EN.search(text):
-        return "meeting_reschedule", 0.85
-    if SCHEDULE_EN.search(text):
-        return "meeting_schedule", 0.8
-    if BONSPLANS_RE.search(text):
-        return "bonsplans", 0.75
-    if ATTENTE_RE.search(text):
-        return "attente", 0.7
-    if ACTION_RE.search(text):
-        return "action", 0.7
-    # Layer 2: spaCy NER + morphology for remaining emails
-    if nlp is not None:
-        try:
-            return _classify_with_spacy(text, nlp)
-        except Exception:
-            pass
-    return "info", 0.3
+def _score_categories(text: str) -> dict[str, float]:
+    """Return weighted match scores per category across all patterns.
+
+    Each pattern's contribution is capped at 3 matches to prevent a single
+    verbose category from dominating purely by repetition.
+    """
+    scores: dict[str, float] = {}
+    for cat, pat in _CATEGORY_PATTERNS:
+        count = len(pat.findall(text))
+        if count > 0:
+            scores[cat] = min(count, 3) * _CATEGORY_WEIGHTS[cat]
+    return scores
+
+
+_RDV_HIERARCHY = ["meeting_cancel", "meeting_reschedule", "meeting_schedule"]
+
+
+def _apply_rdv_hierarchy(scores: dict[str, float]) -> dict[str, float]:
+    """Enforce cancel > reschedule > schedule precedence within meeting types.
+
+    'réunion' and other generic meeting words match SCHEDULE_EN but also appear
+    in cancellation / reschedule emails, inflating the schedule score. When any
+    higher-specificity meeting category matches, we drop the less-specific ones.
+    """
+    for i, cat in enumerate(_RDV_HIERARCHY[:-1]):
+        if scores.get(cat, 0) > 0:
+            for lower in _RDV_HIERARCHY[i + 1:]:
+                scores.pop(lower, None)
+            break
+    return scores
+
+
+def _classify(text: str, nlp=None) -> tuple[Classification, float, bool]:
+    """Classify text using the weighted scoring matrix across all regex patterns.
+
+    Returns (classification, confidence, needs_llm).
+
+    confidence formula:
+        base = 0.5 + 0.4 * (top_score / total) + 0.1 * margin_ratio
+        where margin_ratio = (top - second) / total
+        Capped at 0.95.
+
+    needs_llm is True when no regex matched or confidence < LLM_CONFIDENCE_THRESHOLD.
+    """
+    scores = _score_categories(text)
+
+    if not scores:
+        # No regex hit — fall through to spaCy layer 2
+        if nlp is not None:
+            try:
+                cls, conf = _classify_with_spacy(text, nlp)
+                return cls, conf, conf < settings.LLM_CONFIDENCE_THRESHOLD
+            except Exception:
+                pass
+        return "info", 0.3, True
+
+    # Among meeting types, the more specific signal (cancel > reschedule > schedule)
+    # takes priority even if a generic word like "réunion" boosts the schedule score.
+    scores = _apply_rdv_hierarchy(dict(scores))
+
+    sorted_cats = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    top_cat, top_score = sorted_cats[0]
+    second_score = sorted_cats[1][1] if len(sorted_cats) > 1 else 0.0
+    total = sum(scores.values())
+
+    margin = (top_score - second_score) / total if total else 0.0
+    confidence = min(0.5 + 0.4 * (top_score / total) + 0.1 * margin, 0.95)
+    return top_cat, confidence, confidence < settings.LLM_CONFIDENCE_THRESHOLD
 
 
 def classification_to_category(classification: str) -> str:
@@ -281,11 +420,12 @@ class EmailExtractor:
     def extract(self, email: EmailInput) -> ExtractionResult:
         text = f"{email.subject}\n{email.body}".strip()
         if not text:
-            return ExtractionResult(classification="info", confidence=0.0)
+            return ExtractionResult(classification="info", confidence=0.0, needs_llm=False)
 
-        classification, base_conf = _classify(text, self.nlp)
-        proposed_times = _extract_times(text)
-        duration_minutes = _extract_duration_minutes(text)
+        classification, base_conf, needs_llm = _classify(text, self.nlp)
+        _meeting_types = ("meeting_schedule", "meeting_cancel", "meeting_reschedule")
+        proposed_times = _extract_times(text) if classification in _meeting_types else []
+        duration_minutes = _extract_duration_minutes(text) if classification in _meeting_types else None
         timezone = _extract_timezone(text)
         meeting_link, link_platform = _extract_meeting_link(text)
         modality = _extract_modality(text, link_platform)
@@ -319,5 +459,6 @@ class EmailExtractor:
             constraints=[],
             thread_status=thread_status,
             needs_clarification=needs_clarification,
+            needs_llm=needs_llm,
             confidence=confidence,
         )

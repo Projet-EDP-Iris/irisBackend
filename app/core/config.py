@@ -1,5 +1,5 @@
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,8 +21,16 @@ class Settings(BaseSettings):
 
     # NLP Settings
     NLP_MODEL_PATH: str = "fr_core_news_sm"
-    OPENAI_API_KEY: str | None = Field(default=None)
-    LLM_CONFIDENCE_THRESHOLD: float = Field(default=0.6)
+    # Accepts both OPENAI_API_KEY and OPEN_AI_KEY from the environment
+    OPENAI_API_KEY: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_API_KEY", "OPEN_AI_KEY"),
+    )
+    LLM_CONFIDENCE_THRESHOLD: float = Field(default=0.75)
+
+    # Resend (transactional email)
+    RESEND_API_KEY: str | None = Field(default=None)
+    RESEND_FROM_EMAIL: str = Field(default="noreply@iris-app.com")
 
     # Gmail OAuth (optional; for OAuth callback flow)
     GOOGLE_CLIENT_ID: str | None = Field(default=None)

@@ -83,3 +83,24 @@ def test_empty_email(extractor):
     result = extractor.extract(email)
     assert result.classification == "info"
     assert result.confidence == 0.0
+
+
+def test_cancel_wins_when_both_cancel_and_reschedule_present(extractor):
+    """Scoring matrix regression: cancel (weight 3.0) should beat reschedule (2.5)."""
+    email = EmailInput(
+        subject="Meeting cancelled",
+        body="The meeting is cancelled. We will reschedule later.",
+    )
+    result = extractor.extract(email)
+    assert result.classification == "meeting_cancel"
+
+
+def test_needs_llm_false_for_high_confidence_cancel(extractor):
+    """High-signal cancel email should not be flagged for LLM fallback."""
+    email = EmailInput(
+        subject="Call cancelled",
+        body="The call has been cancelled. Please cancel all related calendar invites.",
+    )
+    result = extractor.extract(email)
+    assert result.classification == "meeting_cancel"
+    assert result.needs_llm is False

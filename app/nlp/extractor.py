@@ -32,6 +32,7 @@ to the five UI tab IDs: rdv / action / attente / bonsplans / info.
 import re
 from datetime import datetime
 
+from app.core.config import settings
 from app.schemas.detection import (
     Classification,
     EmailInput,
@@ -126,6 +127,29 @@ INFO_RE = re.compile(
     r"à\s+titre\s+d.information)\b",
     re.IGNORECASE,
 )
+# Weights and ordered pattern list for the scoring matrix.
+# Higher weight = stronger evidence signal for that category.
+# cancel/reschedule intentionally outweigh schedule to avoid false positives
+# when a cancellation email also contains a "reschedule later" phrase.
+_CATEGORY_WEIGHTS: dict[str, float] = {
+    "meeting_cancel":     3.0,
+    "meeting_reschedule": 2.5,
+    "meeting_schedule":   2.0,
+    "bonsplans":          1.5,
+    "attente":            1.5,
+    "action":             1.5,
+    "info":               1.0,
+}
+_CATEGORY_PATTERNS: list[tuple[str, re.Pattern]] = [
+    ("meeting_cancel",     CANCEL_EN),
+    ("meeting_reschedule", RESCHEDULE_EN),
+    ("meeting_schedule",   SCHEDULE_EN),
+    ("bonsplans",          BONSPLANS_RE),
+    ("attente",            ATTENTE_RE),
+    ("action",             ACTION_RE),
+    ("info",               INFO_RE),
+]
+
 DURATION_RE = re.compile(
     r"(\d+)\s*(?:min(?:ute)?s?|h(?:our)?s?|hrs?)\b",
     re.IGNORECASE,
@@ -196,29 +220,74 @@ def _classify_with_spacy(text: str, nlp) -> tuple[str, float]:
     return "info", 0.3
 
 
-def _classify(text: str, nlp=None) -> tuple[Classification, float]:
-    # Layer 1: Regex — fast, high-confidence keyword matching
-    if CANCEL_EN.search(text):
-        return "meeting_cancel", 0.9
-    if RESCHEDULE_EN.search(text):
-        return "meeting_reschedule", 0.85
-    if SCHEDULE_EN.search(text):
-        return "meeting_schedule", 0.8
-    if BONSPLANS_RE.search(text):
-        return "bonsplans", 0.75
-    if ATTENTE_RE.search(text):
-        return "attente", 0.7
-    if ACTION_RE.search(text):
-        return "action", 0.7
-    if INFO_RE.search(text):
-        return "info", 0.65
-    # Layer 2: spaCy NER + morphology for remaining emails
-    if nlp is not None:
-        try:
-            return _classify_with_spacy(text, nlp)
-        except Exception:
-            pass
-    return "info", 0.3
+def _score_categories(text: str) -> dict[str, float]:
+    """Return weighted match scores per category across all patterns.
+
+    Each pattern's contribution is capped at 3 matches to prevent a single
+    verbose category from dominating purely by repetition.
+    """
+    scores: dict[str, float] = {}
+    for cat, pat in _CATEGORY_PATTERNS:
+        count = len(pat.findall(text))
+        if count > 0:
+            scores[cat] = min(count, 3) * _CATEGORY_WEIGHTS[cat]
+    return scores
+
+
+_RDV_HIERARCHY = ["meeting_cancel", "meeting_reschedule", "meeting_schedule"]
+
+
+def _apply_rdv_hierarchy(scores: dict[str, float]) -> dict[str, float]:
+    """Enforce cancel > reschedule > schedule precedence within meeting types.
+
+    'réunion' and other generic meeting words match SCHEDULE_EN but also appear
+    in cancellation / reschedule emails, inflating the schedule score. When any
+    higher-specificity meeting category matches, we drop the less-specific ones.
+    """
+    for i, cat in enumerate(_RDV_HIERARCHY[:-1]):
+        if scores.get(cat, 0) > 0:
+            for lower in _RDV_HIERARCHY[i + 1:]:
+                scores.pop(lower, None)
+            break
+    return scores
+
+
+def _classify(text: str, nlp=None) -> tuple[Classification, float, bool]:
+    """Classify text using the weighted scoring matrix across all regex patterns.
+
+    Returns (classification, confidence, needs_llm).
+
+    confidence formula:
+        base = 0.5 + 0.4 * (top_score / total) + 0.1 * margin_ratio
+        where margin_ratio = (top - second) / total
+        Capped at 0.95.
+
+    needs_llm is True when no regex matched or confidence < LLM_CONFIDENCE_THRESHOLD.
+    """
+    scores = _score_categories(text)
+
+    if not scores:
+        # No regex hit — fall through to spaCy layer 2
+        if nlp is not None:
+            try:
+                cls, conf = _classify_with_spacy(text, nlp)
+                return cls, conf, conf < settings.LLM_CONFIDENCE_THRESHOLD
+            except Exception:
+                pass
+        return "info", 0.3, True
+
+    # Among meeting types, the more specific signal (cancel > reschedule > schedule)
+    # takes priority even if a generic word like "réunion" boosts the schedule score.
+    scores = _apply_rdv_hierarchy(dict(scores))
+
+    sorted_cats = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    top_cat, top_score = sorted_cats[0]
+    second_score = sorted_cats[1][1] if len(sorted_cats) > 1 else 0.0
+    total = sum(scores.values())
+
+    margin = (top_score - second_score) / total if total else 0.0
+    confidence = min(0.5 + 0.4 * (top_score / total) + 0.1 * margin, 0.95)
+    return top_cat, confidence, confidence < settings.LLM_CONFIDENCE_THRESHOLD
 
 
 def classification_to_category(classification: str) -> str:
@@ -351,9 +420,9 @@ class EmailExtractor:
     def extract(self, email: EmailInput) -> ExtractionResult:
         text = f"{email.subject}\n{email.body}".strip()
         if not text:
-            return ExtractionResult(classification="info", confidence=0.0)
+            return ExtractionResult(classification="info", confidence=0.0, needs_llm=False)
 
-        classification, base_conf = _classify(text, self.nlp)
+        classification, base_conf, needs_llm = _classify(text, self.nlp)
         _meeting_types = ("meeting_schedule", "meeting_cancel", "meeting_reschedule")
         proposed_times = _extract_times(text) if classification in _meeting_types else []
         duration_minutes = _extract_duration_minutes(text) if classification in _meeting_types else None
@@ -390,5 +459,6 @@ class EmailExtractor:
             constraints=[],
             thread_status=thread_status,
             needs_clarification=needs_clarification,
+            needs_llm=needs_llm,
             confidence=confidence,
         )

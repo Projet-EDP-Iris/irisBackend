@@ -5,6 +5,27 @@ import pytest
 from app.nlp.llm_fallback_openai import LLMFallbackOpenAI, _merge_patch
 from app.schemas.detection import EmailInput, ExtractionResult
 
+# ---------------------------------------------------------------------------
+# Async tests — require pytest-asyncio
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_classify_category_async_returns_empty_without_api_key(monkeypatch):
+    monkeypatch.setattr("app.nlp.llm_fallback_openai.settings.OPENAI_API_KEY", None)
+    fallback = LLMFallbackOpenAI()
+    result = await fallback.classify_category_async("Some email text needing classification")
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_classify_batch_async_length_matches_input(monkeypatch):
+    monkeypatch.setattr("app.nlp.llm_fallback_openai.settings.OPENAI_API_KEY", None)
+    fallback = LLMFallbackOpenAI()
+    results = await fallback.classify_batch_async(["email one", "email two", "email three"])
+    assert len(results) == 3
+    assert all(r == {} for r in results)  # all empty — no API key
+
 
 @pytest.fixture
 def low_confidence_result():

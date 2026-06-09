@@ -109,3 +109,82 @@ class LLMFallbackOpenAI:
             return _merge_patch(partial, patch)
         except Exception:
             return partial
+
+    # ------------------------------------------------------------------ #
+    # Async category-only classifier — used for ambiguous emails in batch  #
+    # ------------------------------------------------------------------ #
+
+    @property
+    def async_client(self):
+        if not hasattr(self, "_async_client"):
+            self._async_client = None
+        if self._async_client is None and settings.OPENAI_API_KEY:
+            from openai import AsyncOpenAI
+            self._async_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        return self._async_client
+
+    async def classify_category_async(self, text: str) -> dict:
+        """Classify a single email into one of 7 categories asynchronously.
+
+        Returns {"category": "...", "confidence": 0.0-1.0} or {} on failure.
+        Only called for emails flagged needs_llm=True by the scoring matrix.
+        """
+        if not settings.OPENAI_API_KEY or not self.async_client:
+            return {}
+        _schema = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "category_classification",
+                "strict": True,
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": [
+                                "meeting_schedule", "meeting_cancel", "meeting_reschedule",
+                                "action", "attente", "bonsplans", "info",
+                            ],
+                        },
+                        "confidence": {"type": "number"},
+                    },
+                    "required": ["category", "confidence"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+        _system = (
+            "You are an email classifier. Classify the email into exactly one category:\n"
+            "- meeting_schedule: scheduling a meeting, call, or appointment\n"
+            "- meeting_cancel: cancelling a meeting or appointment\n"
+            "- meeting_reschedule: moving or rescheduling an existing meeting\n"
+            "- action: requires the reader to take a specific action or decision\n"
+            "- attente: follow-up, waiting for a reply, checking on something pending\n"
+            "- bonsplans: promotional offer, discount, deal, or marketing email\n"
+            "- info: informational only — newsletter, FYI, report, no action needed\n\n"
+            'Return ONLY: {"category": "...", "confidence": 0.0–1.0}'
+        )
+        try:
+            resp = await self.async_client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": _system},
+                    {"role": "user", "content": text[:1000]},
+                ],
+                response_format=_schema,
+            )
+            content = resp.choices[0].message.content
+            result = json.loads(content) if content else {}
+            return result if isinstance(result, dict) else {}
+        except Exception:
+            return {}
+
+    async def classify_batch_async(self, texts: list[str]) -> list[dict]:
+        """Classify a list of email texts concurrently.
+
+        Returns a list parallel to the input; failed entries are empty dicts.
+        """
+        import asyncio
+        return list(await asyncio.gather(
+            *[self.classify_category_async(t) for t in texts]
+        ))

@@ -14,6 +14,7 @@ class EmailItem(BaseModel):
     category: str = "info"  # UI tab: rdv | action | attente | bonsplans | info
     db_id: int | None = None  # DB primary key — populated after upsert
     provider: str = "unknown"  # "gmail" | "outlook" | "unknown"
+    suggested_reply: str | None = None
 
 
 class EmailFeedResponse(BaseModel):

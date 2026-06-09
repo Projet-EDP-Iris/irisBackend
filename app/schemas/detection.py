@@ -41,6 +41,8 @@ class EmailInput(BaseModel):
     subject: str = ""
     body: str = ""
     message_id: str | None = None
+    sender: str = ""
+    headers: dict[str, str] | None = None
 
 
 class EmailBatchInput(BaseModel):
@@ -74,6 +76,7 @@ class ExtractionResult(BaseModel):
     thread_status: ThreadStatusLiteral = "unknown"
     needs_clarification: bool = False
     needs_review: bool = False
+    needs_llm: bool = False
     confidence: float = 0.0
 
 

@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sqlalchemy.orm import Session
 
@@ -47,11 +48,22 @@ def detect_single(email: EmailInput) -> ExtractionResult:
     partial = extractor.extract(email)
     if partial.confidence < settings.LLM_CONFIDENCE_THRESHOLD and settings.OPENAI_API_KEY:
         partial = _get_llm_fallback().enhance(email, partial)
+    # Safety net: if still unresolved after all layers, flag for manual review
+    if partial.classification in ("other",) and partial.confidence < 0.4:
+        partial.classification = "info"
+        partial.needs_review = True
     return partial
 
 
 def detect_batch(emails: list[EmailInput]) -> list[ExtractionResult]:
-    return [detect_single(e) for e in emails]
+    if not emails:
+        return []
+    with ThreadPoolExecutor(max_workers=min(8, len(emails))) as executor:
+        futures = {executor.submit(detect_single, e): i for i, e in enumerate(emails)}
+        results: list[ExtractionResult | None] = [None] * len(emails)
+        for future in as_completed(futures):
+            results[futures[future]] = future.result()
+    return results  # type: ignore[return-value]
 
 
 def _merge_thread_results(results: list[ExtractionResult]) -> ExtractionResult:

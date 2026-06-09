@@ -1,4 +1,5 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime as _parsedate
 
@@ -93,9 +94,6 @@ def _get_gmail_emails(user_id: int, max_results: int | None = None) -> list[Emai
             message_id=r["message_id"],
             sender=r.get("sender"),
             date=r.get("date"),
-            category=categorize_email(
-                DetectionEmailInput(subject=r["subject"], body=r["body"])
-            ),
             provider="gmail",
         )
         for r in raw
@@ -164,6 +162,14 @@ def get_emails(
     Returns HTTP 404 if neither Gmail nor Outlook is connected.
     """
     items = _get_all_emails_for_user(current_user.id, max_results=max_results)
+    if items:
+        with ThreadPoolExecutor(max_workers=min(8, len(items))) as executor:
+            futures = {
+                executor.submit(categorize_email, DetectionEmailInput(subject=it.subject, body=it.body)): i
+                for i, it in enumerate(items)
+            }
+            for future in _as_completed(futures):
+                items[futures[future]].category = future.result()
     _upsert_email_items(db, current_user.id, items)
     return items
 
@@ -178,11 +184,8 @@ def post_fetch_and_detect(
     Returns HTTP 404 if no email provider is connected.
     """
     email_items = _get_all_emails_for_user(current_user.id, max_results=max_results)
-
-    # Build EmailInput objects for detection
-    from app.schemas.detection import EmailInput  # local import to avoid circular
     email_inputs = [
-        EmailInput(
+        DetectionEmailInput(
             subject=e.subject,
             body=e.body,
             message_id=e.message_id or "",
@@ -211,10 +214,8 @@ def post_fetch_detect_predict(
     Returns HTTP 404 if no email provider is connected.
     """
     email_items = _get_all_emails_for_user(current_user.id, max_results=max_results)
-
-    from app.schemas.detection import EmailInput
     email_inputs = [
-        EmailInput(
+        DetectionEmailInput(
             subject=e.subject,
             body=e.body,
             message_id=e.message_id or "",
@@ -294,8 +295,6 @@ def get_email_feed(
     Paginated email feed for infinite scroll.
     Fetches one page from Gmail (batch, metadata + snippet) and one page from Outlook.
     """
-    from app.schemas.detection import EmailInput as _DetectionInput
-
     # Pre-fetch known message IDs + stored categories to skip NLP for already-categorised emails.
     existing_categories: dict[str, str] = {
         row.message_id: (row.category or "info")
@@ -310,7 +309,12 @@ def get_email_feed(
     gmail_next_cursor: str | None = None
 
     svc = GmailService()
-    if svc.authenticate_for_user(current_user.id):
+    try:
+        gmail_ok = svc.authenticate_for_user(current_user.id)
+    except Exception as exc:
+        logger.warning("Gmail auth failed for user %d: %s", current_user.id, exc)
+        gmail_ok = False
+    if gmail_ok:
         raw_list, gmail_next_cursor = svc.fetch_email_page(page_token=gmail_cursor, limit=limit)
         gmail_emails = [
             EmailItem(
@@ -319,11 +323,7 @@ def get_email_feed(
                 message_id=r["message_id"],
                 sender=r.get("sender"),
                 date=r.get("date"),
-                category=(
-                    categorize_email(_DetectionInput(subject=r["subject"], body=r["body"]))
-                    if r.get("message_id") not in existing_ids
-                    else existing_categories.get(r.get("message_id"), "info")
-                ),
+                category=existing_categories.get(r.get("message_id"), None),
                 provider="gmail",
             )
             for r in raw_list
@@ -347,6 +347,21 @@ def get_email_feed(
     all_emails = gmail_emails + outlook_emails
     all_emails.sort(key=lambda e: _sort_key(e.date), reverse=True)
 
+    uncategorized = [(i, it) for i, it in enumerate(all_emails) if not it.category]
+    if uncategorized:
+        with ThreadPoolExecutor(max_workers=min(8, len(uncategorized))) as executor:
+            futures = {
+                executor.submit(categorize_email, DetectionEmailInput(subject=it.subject, body=it.body)): i
+                for i, it in uncategorized
+            }
+            for future in _as_completed(futures):
+                idx = futures[future]
+                try:
+                    all_emails[idx].category = future.result()
+                except Exception as exc:
+                    logger.warning("categorize_email failed for email %d: %s", idx, exc)
+                    all_emails[idx].category = "info"
+
     has_more = (gmail_next_cursor is not None) or outlook_has_more
 
     _upsert_email_items(db, current_user.id, all_emails)
@@ -364,7 +379,6 @@ def sync_user_emails_background(user_id: int) -> None:
     Called as a FastAPI BackgroundTask after OAuth so the DB is populated before
     the frontend's next /emails/cached or /emails/feed poll."""
     from app.db.database import SessionLocal  # local import — runs in background thread
-    from app.schemas.detection import EmailInput  # noqa: PLC0414
     db = SessionLocal()
     try:
         items: list[EmailItem] = []
@@ -379,7 +393,7 @@ def sync_user_emails_background(user_id: int) -> None:
                         message_id=r["message_id"],
                         sender=r.get("sender"),
                         date=r.get("date"),
-                        category=categorize_email(EmailInput(subject=r["subject"], body=r["body"])),
+                        category=categorize_email(DetectionEmailInput(subject=r["subject"], body=r["body"])),
                         provider="gmail",
                     )
                     for r in raw_list

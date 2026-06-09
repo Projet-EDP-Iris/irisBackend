@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     # NLP Settings
     NLP_MODEL_PATH: str = "fr_core_news_sm"
     OPENAI_API_KEY: str | None = Field(default=None)
-    LLM_CONFIDENCE_THRESHOLD: float = Field(default=0.6)
+    LLM_CONFIDENCE_THRESHOLD: float = Field(default=0.75)
 
     # Gmail OAuth (optional; for OAuth callback flow)
     GOOGLE_CLIENT_ID: str | None = Field(default=None)

@@ -2,7 +2,7 @@
 
 Backend API for the Iris application, built with **FastAPI** and **Python 3.12**. Manages user authentication, Gmail integration, NLP email analysis, meeting slot prediction, multi-provider calendar sync, and AI-generated reply drafts.
 
-**Deployed on:** [Render](https://render.com)
+**Deployed on:** [Render](https://render.com) · **Frontend:** [irisFrontendApp](https://github.com/Projet-EDP-Iris/irisFrontendApp) — React + Electron desktop app
 
 ---
 
@@ -402,6 +402,8 @@ Third-party integrations have dedicated step-by-step setup docs in the [`docs/`]
 - [Apple Calendar (iCloud CalDAV + App Password)](docs/APPLE_CALENDAR_SETUP.md)
 - [Microsoft / Outlook (Azure App Registration)](docs/MICROSOFT_OAUTH_SETUP.md)
 - [Production Deployment on Render](docs/DEPLOYMENT.md)
+- [Email Triage Algorithm](docs/TRIAGE_ALGORITHM.md)
+- [AI Features: Summarize, Reply, Auto-draft](docs/AI_FEATURES.md)
 
 ---
 

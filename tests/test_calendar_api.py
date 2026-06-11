@@ -465,3 +465,80 @@ class TestConfirmCalendar:
 
         assert r.status_code == 502
         assert "quota exceeded" in r.json()["detail"].lower()
+
+
+# ─────────────────────────────────────────────
+# Conflict Check endpoint tests
+# ─────────────────────────────────────────────
+
+class TestCheckConflicts:
+
+    def test_check_conflicts_no_conflict_returns_false(self):
+        """When no events exist in the slot window, has_conflict is False."""
+        token = _create_and_login()
+        client.patch(
+            "/api/v1/users/me/calendar-setup",
+            headers=_auth(token),
+            json={"calendar_provider": "google"},
+        )
+        email_id = _seed_email_with_slots(token)
+
+        with patch(
+            "app.api.endpoints.calendar.list_google_calendar_events",
+            return_value=[],
+        ):
+            r = client.get(
+                f"/api/v1/calendar/check-conflicts/{email_id}",
+                headers=_auth(token),
+            )
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["has_conflict"] is False
+        assert body["conflicts"] == []
+
+    def test_check_conflicts_google_busy_returns_conflict(self):
+        """When Google returns an overlapping event, has_conflict is True and the event appears in conflicts."""
+        token = _create_and_login()
+        client.patch(
+            "/api/v1/users/me/calendar-setup",
+            headers=_auth(token),
+            json={"calendar_provider": "google"},
+        )
+        email_id = _seed_email_with_slots(token)
+
+        busy_event = {
+            "title": "Réunion budgétaire",
+            "start": "2024-10-18T10:00:00",
+            "end": "2024-10-18T10:30:00",
+        }
+
+        with patch(
+            "app.api.endpoints.calendar.list_google_calendar_events",
+            return_value=[busy_event],
+        ):
+            r = client.get(
+                f"/api/v1/calendar/check-conflicts/{email_id}",
+                headers=_auth(token),
+            )
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["has_conflict"] is True
+        assert len(body["conflicts"]) == 1
+        assert body["conflicts"][0]["provider"] == "google"
+        assert body["conflicts"][0]["title"] == "Réunion budgétaire"
+
+    def test_check_conflicts_email_not_found_returns_404(self):
+        """Non-existent email ID returns 404."""
+        token = _create_and_login()
+        r = client.get(
+            "/api/v1/calendar/check-conflicts/99999",
+            headers=_auth(token),
+        )
+        assert r.status_code == 404
+
+    def test_check_conflicts_unauthenticated_returns_403(self):
+        """Conflict check endpoint requires authentication."""
+        r = client.get("/api/v1/calendar/check-conflicts/1")
+        assert r.status_code == 403

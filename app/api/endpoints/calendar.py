@@ -23,16 +23,28 @@ from app.core.auth import get_current_active_user
 from app.db.database import get_db
 from app.models.email import Email
 from app.models.user import User
-from app.services.apple_calendar_service import create_apple_calendar_event
-from app.services.google_calendar_service import create_google_calendar_event
+from app.services.apple_calendar_service import create_apple_calendar_event, list_apple_calendar_events
+from app.services.google_calendar_service import create_google_calendar_event, list_google_calendar_events
 from app.services.google_tasks_service import create_google_task
-from app.services.outlook_calendar_service import create_outlook_calendar_event
+from app.services.outlook_calendar_service import create_outlook_calendar_event, list_outlook_calendar_events
 from app.services.outlook_tasks_service import create_outlook_task
 from app.services.suggestion_service import generate_email_suggestion
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["calendar"])
+
+
+class ConflictItem(BaseModel):
+    provider: str
+    title: str
+    start: str
+    end: str
+
+
+class ConflictCheckResponse(BaseModel):
+    has_conflict: bool
+    conflicts: list[ConflictItem]
 
 
 class ConfirmCalendarRequest(BaseModel):
@@ -269,4 +281,113 @@ def confirm_and_add_to_calendar(
         providers=provider_results,
         calendar_event_ids=event_ids,
         prepared_reply=prepared_reply,
+    )
+
+
+@router.get(
+    "/calendar/check-conflicts/{email_id}",
+    response_model=ConflictCheckResponse,
+    summary="Check for calendar conflicts before confirming a predicted slot",
+)
+def check_calendar_conflicts(
+    email_id: int,
+    slot_index: int = 0,
+    timezone: str = "UTC",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> ConflictCheckResponse:
+    """
+    Pre-flight conflict check for a predicted meeting slot.
+
+    Queries each connected calendar provider for existing events that overlap
+    the chosen slot. Returns conflicts found without creating anything.
+    All provider failures are silenced — a provider that is unreachable
+    is treated as conflict-free so it never blocks the confirm flow.
+    """
+    email_record = (
+        db.query(Email)
+        .filter(Email.id == email_id, Email.user_id == current_user.id)
+        .first()
+    )
+    if not email_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+
+    # Resolve predicted slots on-demand (same logic as confirm endpoint)
+    if not email_record.predicted_slots:
+        from app.schemas.detection import EmailInput  # noqa: PLC0415
+        from app.services.detection import detect_single  # noqa: PLC0415
+        from app.services.prediction_service import get_suggested_slots  # noqa: PLC0415
+
+        ext = detect_single(EmailInput(
+            subject=email_record.subject or "",
+            body=email_record.body or "",
+        ))
+        slots = get_suggested_slots(ext)
+        if slots:
+            email_record.predicted_slots = [s.model_dump(mode="json") for s in slots]
+            db.flush()
+
+    if not email_record.predicted_slots:
+        t = (
+            datetime.now(UTC)
+            .replace(hour=10, minute=0, second=0, microsecond=0)
+            + timedelta(days=1)
+        )
+        email_record.predicted_slots = [{
+            "start_time": t.isoformat(),
+            "end_time": (t + timedelta(hours=1)).isoformat(),
+            "score": 0.5,
+            "label": "default",
+        }]
+        db.flush()
+
+    slots: list[dict] = email_record.predicted_slots
+    if slot_index >= len(slots):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"slot_index {slot_index} out of range — only {len(slots)} slot(s) available.",
+        )
+    chosen_slot = slots[slot_index]
+    start = datetime.fromisoformat(chosen_slot["start_time"])
+    end = datetime.fromisoformat(chosen_slot["end_time"])
+
+    providers: list[str] = list(current_user.calendar_providers or [])
+    if not providers:
+        single = current_user.calendar_provider
+        if single:
+            providers = [single]
+
+    all_conflicts: list[ConflictItem] = []
+
+    for provider in providers:
+        raw: list[dict] = []
+        if provider == "google":
+            raw = list_google_calendar_events(current_user.id, start, end)
+        elif provider == "outlook":
+            raw = list_outlook_calendar_events(current_user.id, start, end)
+        elif provider == "apple":
+            if not current_user.apple_caldav_user or not current_user.apple_caldav_password:
+                logger.warning(
+                    "Apple CalDAV not configured for user %d — no conflict check possible. "
+                    "User must add an App-Specific Password via Settings → Calendriers.",
+                    current_user.id,
+                )
+            else:
+                raw = list_apple_calendar_events(
+                    current_user.apple_caldav_user,
+                    current_user.apple_caldav_password,
+                    start,
+                    end,
+                )
+        for item in raw:
+            all_conflicts.append(ConflictItem(
+                provider=provider,
+                title=item.get("title", "Événement"),
+                start=item.get("start", ""),
+                end=item.get("end", ""),
+            ))
+
+    return ConflictCheckResponse(
+        has_conflict=len(all_conflicts) > 0,
+        conflicts=all_conflicts,
     )

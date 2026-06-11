@@ -276,16 +276,20 @@ async def post_fetch_detect_predict(
 def get_cached_emails(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    category: str | None = Query(default=None),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> EmailFeedResponse:
     """
     Return emails already stored in the DB for this user — no external API calls.
-    Used for instant first-paint before the background /emails/feed refresh completes.
+    Supports optional ?category= filter so each tab gets only its own emails.
+    Body is truncated to 500 chars for list views; use GET /emails/{id} for full body.
     """
+    query = db.query(Email).filter(Email.user_id == current_user.id)
+    if category:
+        query = query.filter(Email.category == category)
     rows = (
-        db.query(Email)
-        .filter(Email.user_id == current_user.id)
+        query
         .order_by(Email.received_at.desc())
         .offset(offset)
         .limit(limit + 1)
@@ -296,7 +300,7 @@ def get_cached_emails(
     items = [
         EmailItem(
             subject=row.subject or "",
-            body=row.body or "",
+            body=(row.body or "")[:500],
             message_id=row.message_id,
             rfc_message_id=row.rfc_message_id,
             sender=row.sender,
@@ -310,11 +314,13 @@ def get_cached_emails(
     return EmailFeedResponse(emails=items, has_more=has_more)
 
 
+
 @router.get("/emails/feed", response_model=EmailFeedResponse)
 def get_email_feed(
     limit: int = 50,
     gmail_cursor: str | None = None,
     outlook_skip: int = 0,
+    category: str | None = None,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> EmailFeedResponse:
@@ -343,19 +349,20 @@ def get_email_feed(
         gmail_ok = False
     if gmail_ok:
         raw_list, gmail_next_cursor = svc.fetch_email_page(page_token=gmail_cursor, limit=limit)
-        gmail_emails = [
-            EmailItem(
+        gmail_emails = []
+        for r in raw_list:
+            existing_cat = existing_categories.get(r.get("message_id"))
+            item = EmailItem(
                 subject=r["subject"],
                 body=r["body"],
                 message_id=r["message_id"],
                 rfc_message_id=r.get("rfc_message_id"),
                 sender=r.get("sender"),
                 date=r.get("date"),
-                category=existing_categories.get(r.get("message_id"), None),
                 provider="gmail",
+                **({"category": existing_cat} if existing_cat else {}),
             )
-            for r in raw_list
-        ]
+            gmail_emails.append(item)
 
     outlook_emails: list[EmailItem] = []
     outlook_has_more = False
@@ -375,7 +382,7 @@ def get_email_feed(
     all_emails = gmail_emails + outlook_emails
     all_emails.sort(key=lambda e: _sort_key(e.date), reverse=True)
 
-    uncategorized = [(i, it) for i, it in enumerate(all_emails) if not it.category]
+    uncategorized = [(i, it) for i, it in enumerate(all_emails) if it.message_id not in existing_ids]
     if uncategorized:
         with ThreadPoolExecutor(max_workers=min(8, len(uncategorized))) as executor:
             futures = {
@@ -393,6 +400,14 @@ def get_email_feed(
     has_more = (gmail_next_cursor is not None) or outlook_has_more
 
     _upsert_email_items(db, current_user.id, all_emails)
+
+    if category:
+        all_emails = [e for e in all_emails if e.category == category]
+
+    # Truncate body for list view — full body available via GET /emails/{id}
+    for e in all_emails:
+        if e.body and len(e.body) > 500:
+            e.body = e.body[:500]
 
     return EmailFeedResponse(
         emails=all_emails,
@@ -464,6 +479,7 @@ def get_email_body(
 class _SummarizeRequest(BaseModel):
     subject: str = ""
     body: str = ""
+    db_id: int | None = None
 
 
 class _SummarizeResponse(BaseModel):
@@ -473,15 +489,25 @@ class _SummarizeResponse(BaseModel):
 @router.post("/emails/summarize", response_model=_SummarizeResponse)
 async def summarize_email(
     req: _SummarizeRequest,
-    _: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
 ) -> _SummarizeResponse:
     """Generate a 2–3 sentence AI summary of an email.
 
+    When db_id is provided, fetches the full body from the DB so the model
+    gets the complete text rather than the 500-char list-view truncation.
     Detects the email language and writes the summary in that language.
     Requires OPENAI_API_KEY to be configured; returns an empty summary otherwise.
     """
     from app.services.openai_service import generate_summary
-    summary = await generate_summary(req.subject, req.body)
+    body = req.body
+    if req.db_id:
+        row = db.query(Email).filter(
+            Email.id == req.db_id, Email.user_id == current_user.id
+        ).first()
+        if row and row.body:
+            body = row.body
+    summary = await generate_summary(req.subject, body)
     return _SummarizeResponse(summary=summary)
 
 
@@ -532,3 +558,49 @@ async def send_email_reply(
         raise HTTPException(status_code=502, detail=f"Email delivery failed: {exc}")
 
     return {"status": "sent", "resend_id": sent_id}
+
+
+@router.get("/emails/counts")
+def get_email_counts(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return per-category email counts for the authenticated user (single GROUP BY query)."""
+    from sqlalchemy import func
+    rows = (
+        db.query(Email.category, func.count(Email.id))
+        .filter(Email.user_id == current_user.id)
+        .group_by(Email.category)
+        .all()
+    )
+    counts = {(cat or "info"): n for cat, n in rows}
+    return {
+        "rdv":       counts.get("rdv", 0),
+        "action":    counts.get("action", 0),
+        "attente":   counts.get("attente", 0),
+        "bonsplans": counts.get("bonsplans", 0),
+        "info":      counts.get("info", 0),
+    }
+
+
+@router.get("/emails/{email_id}", response_model=EmailItem)
+def get_email_detail(
+    email_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> EmailItem:
+    """Return a single email with its full body — used by the reading pane."""
+    row = db.query(Email).filter(Email.id == email_id, Email.user_id == current_user.id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Email not found")
+    return EmailItem(
+        subject=row.subject or "",
+        body=row.body or "",
+        message_id=row.message_id,
+        rfc_message_id=row.rfc_message_id,
+        sender=row.sender,
+        db_id=row.id,
+        category=row.category or "info",
+        date=row.email_date,
+        provider=row.provider or "unknown",
+    )

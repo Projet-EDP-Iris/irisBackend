@@ -64,3 +64,43 @@ def create_outlook_calendar_event(
     )
     resp.raise_for_status()
     return resp.json()["id"]
+
+
+def list_outlook_calendar_events(
+    user_id: int,
+    start: datetime,
+    end: datetime,
+) -> list[dict]:
+    """Return events on the user's primary Outlook calendar that overlap [start, end).
+
+    Each entry: {"title": str, "start": str, "end": str}
+    Returns an empty list on any error so callers can treat failures as no-conflict.
+    """
+    try:
+        access_token = get_valid_token(user_id)
+
+        def _fmt(dt: datetime) -> str:
+            return dt.strftime("%Y-%m-%dT%H:%M:%S")
+
+        resp = httpx.get(
+            f"{_GRAPH_BASE}/me/calendarView",
+            headers={"Authorization": f"Bearer {access_token}"},
+            params={
+                "startDateTime": _fmt(start),
+                "endDateTime": _fmt(end),
+                "$select": "subject,start,end",
+                "$top": "10",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        events = []
+        for item in resp.json().get("value", []):
+            events.append({
+                "title": item.get("subject", "Événement"),
+                "start": item.get("start", {}).get("dateTime", ""),
+                "end": item.get("end", {}).get("dateTime", ""),
+            })
+        return events
+    except Exception:
+        return []

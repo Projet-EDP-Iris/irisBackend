@@ -90,7 +90,9 @@ async def generate_summary(subject: str, body: str) -> str:
 
     system = (
         "You are an email summarizer. Summarize the email in 2–3 concise sentences. "
-        "Detect the language of the email and write the summary in THAT SAME language. "
+        "IMPORTANT: Read the email body carefully and identify the language it is written in. "
+        "Write the summary in THAT EXACT SAME LANGUAGE — if English, summarize in English; "
+        "if French, summarize in French; if Spanish, summarize in Spanish; etc. "
         "Focus on: what the sender wants, any deadlines or dates, and the required action (if any). "
         "Return ONLY the summary text — no labels, no intro phrase."
     )

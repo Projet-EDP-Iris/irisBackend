@@ -82,3 +82,41 @@ def create_google_calendar_event(
     )
 
     return created_event["id"]
+
+
+def list_google_calendar_events(
+    user_id: int,
+    start: datetime,
+    end: datetime,
+) -> list[dict]:
+    """Return events on the user's primary Google Calendar that overlap [start, end).
+
+    Each entry: {"title": str, "start": str, "end": str}
+    Returns an empty list on any error so callers can treat failures as no-conflict.
+    """
+    try:
+        creds = _load_creds_for_user(user_id)
+        service = build("calendar", "v3", credentials=creds)
+        result = (
+            service.events()
+            .list(
+                calendarId="primary",
+                timeMin=start.isoformat() + ("Z" if start.tzinfo is None else ""),
+                timeMax=end.isoformat() + ("Z" if end.tzinfo is None else ""),
+                singleEvents=True,
+                orderBy="startTime",
+            )
+            .execute()
+        )
+        events = []
+        for item in result.get("items", []):
+            start_str = item.get("start", {}).get("dateTime") or item.get("start", {}).get("date", "")
+            end_str = item.get("end", {}).get("dateTime") or item.get("end", {}).get("date", "")
+            events.append({
+                "title": item.get("summary", "Événement"),
+                "start": start_str,
+                "end": end_str,
+            })
+        return events
+    except Exception:
+        return []

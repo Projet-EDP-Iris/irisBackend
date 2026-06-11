@@ -205,3 +205,65 @@ def test_fetch_detect_predict_returns_emails_extractions_and_suggested_slots(
     assert len(data["extractions"]) == 1
     assert isinstance(data["suggested_slots"], list)
     assert data["extractions"][0]["classification"] == "meeting_schedule"
+
+
+# ─────────────────────────────────────────────
+# /emails/feed category filter tests
+# ─────────────────────────────────────────────
+
+@patch("app.api.endpoints.emails.is_outlook_connected", return_value=False)
+@patch("app.api.endpoints.emails.categorize_email")
+@patch("app.services.gmail_service._load_gmail_token_from_db")
+@patch("app.api.endpoints.emails.GmailService")
+def test_feed_category_filter_returns_only_matching_category(
+    mock_gmail, mock_load_token, mock_categorize, _mock_outlook, client_with_db, setup_database, auth_headers
+):
+    """GET /emails/feed?category=rdv must return only emails classified as 'rdv'."""
+    mock_load_token.return_value = ("fake_token", "user@gmail.com")
+    mock_svc = MagicMock()
+    mock_gmail.return_value = mock_svc
+    mock_svc.authenticate_for_user.return_value = True
+    mock_svc.fetch_email_page.return_value = (
+        [
+            {"subject": "Réunion demain", "body": "Rendez-vous lundi", "message_id": "rdv_1", "sender": "a@b.com", "date": "2024-10-18T10:00:00"},
+            {"subject": "Promo 50%", "body": "Code PROMO50", "message_id": "promo_1", "sender": "shop@deals.com", "date": "2024-10-18T09:00:00"},
+            {"subject": "Newsletter", "body": "Actus de la semaine", "message_id": "info_1", "sender": "news@example.com", "date": "2024-10-18T08:00:00"},
+        ],
+        None,
+    )
+    # Simulate NLP categorization: first email is rdv, others are not
+    mock_categorize.side_effect = ["rdv", "bonsplans", "info"]
+
+    r = client_with_db.get("/api/v1/emails/feed?category=rdv", headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert "emails" in data
+    for email in data["emails"]:
+        assert email["category"] == "rdv", f"Expected rdv but got {email['category']} for '{email['subject']}'"
+
+
+@patch("app.api.endpoints.emails.is_outlook_connected", return_value=False)
+@patch("app.api.endpoints.emails.categorize_email")
+@patch("app.services.gmail_service._load_gmail_token_from_db")
+@patch("app.api.endpoints.emails.GmailService")
+def test_feed_no_category_filter_returns_all_emails(
+    mock_gmail, mock_load_token, mock_categorize, _mock_outlook, client_with_db, setup_database, auth_headers
+):
+    """GET /emails/feed without ?category= must return all emails regardless of category."""
+    mock_load_token.return_value = ("fake_token", "user@gmail.com")
+    mock_svc = MagicMock()
+    mock_gmail.return_value = mock_svc
+    mock_svc.authenticate_for_user.return_value = True
+    mock_svc.fetch_email_page.return_value = (
+        [
+            {"subject": "Meeting invite", "body": "Can we meet Monday?", "message_id": "m1", "sender": "a@b.com", "date": "2024-10-18T10:00:00"},
+            {"subject": "Sale 20% off", "body": "Limited time offer CODE20", "message_id": "m2", "sender": "shop@deals.com", "date": "2024-10-18T09:00:00"},
+        ],
+        None,
+    )
+    mock_categorize.side_effect = ["rdv", "bonsplans"]
+
+    r = client_with_db.get("/api/v1/emails/feed", headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["emails"]) == 2

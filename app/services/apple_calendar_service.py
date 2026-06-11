@@ -163,6 +163,39 @@ def update_apple_calendar_event(
     raise RuntimeError(f"Event UID {uid!r} not found in any iCloud calendar for {apple_user}")
 
 
+def list_apple_calendar_events(
+    apple_user: str,
+    encrypted_password: str,
+    start: datetime,
+    end: datetime,
+) -> list[dict]:
+    """Return events on the user's primary iCloud calendar that overlap [start, end).
+
+    Each entry: {"title": str, "start": str, "end": str}
+    Returns an empty list on any error so callers can treat failures as no-conflict.
+    """
+    try:
+        plain_password = decrypt(encrypted_password)
+        _, _, calendars = _connect(apple_user, plain_password)
+        if not calendars:
+            return []
+        events = []
+        for calendar in calendars:
+            results = calendar.date_search(start=start, end=end)
+            for ev in results:
+                try:
+                    vevent = ev.vobject_instance.vevent
+                    title = str(vevent.summary.value) if hasattr(vevent, "summary") else "Événement"
+                    start_val = str(vevent.dtstart.value) if hasattr(vevent, "dtstart") else ""
+                    end_val = str(vevent.dtend.value) if hasattr(vevent, "dtend") else ""
+                    events.append({"title": title, "start": start_val, "end": end_val})
+                except Exception:
+                    continue
+        return events
+    except Exception:
+        return []
+
+
 def delete_apple_calendar_event(
     apple_user: str,
     encrypted_password: str,

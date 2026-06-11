@@ -44,8 +44,10 @@ from app.schemas.detection import (
 
 SCHEDULE_EN = re.compile(
     r"\b(meeting|appointment|réunion|"
-    r"(?:prendre?|fixer|planifier|notre|votre|un)\s+rendez-vous|"
-    r"rendez-vous\s+(?:le\s+\d|à\s+\d{1,2}[h:]|avec|prévu|confirmé|téléphonique)|"
+    r"(?:prendre?|fixer|planifier|notre|votre|un)\s+rendez-?vous|"
+    r"rendez-?vous\s+(?:le\s+\d|à\s+\d{1,2}[h:]|avec|prévu|confirmé|téléphonique)|"
+    r"rendez\s+vous\s+(?:lundi|mardi|mercredi|jeudi|vendredi|le\s+\d|à\s+\d|demain|prévu)|"
+    r"soutenance|entretien\s+(?:prévu|le|demain|lundi|mardi|mercredi|jeudi|vendredi)|"
     r"schedule\s+a\s+(?:call|meeting|time|sync)|"
     r"book\s+a\s+(?:call|meeting|slot|time)|"
     r"set\s+up\s+a\s+(?:call|meeting|time|sync)|find\s+a\s+time|"

@@ -479,6 +479,7 @@ def get_email_body(
 class _SummarizeRequest(BaseModel):
     subject: str = ""
     body: str = ""
+    db_id: int | None = None
 
 
 class _SummarizeResponse(BaseModel):
@@ -488,15 +489,25 @@ class _SummarizeResponse(BaseModel):
 @router.post("/emails/summarize", response_model=_SummarizeResponse)
 async def summarize_email(
     req: _SummarizeRequest,
-    _: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
 ) -> _SummarizeResponse:
     """Generate a 2–3 sentence AI summary of an email.
 
+    When db_id is provided, fetches the full body from the DB so the model
+    gets the complete text rather than the 500-char list-view truncation.
     Detects the email language and writes the summary in that language.
     Requires OPENAI_API_KEY to be configured; returns an empty summary otherwise.
     """
     from app.services.openai_service import generate_summary
-    summary = await generate_summary(req.subject, req.body)
+    body = req.body
+    if req.db_id:
+        row = db.query(Email).filter(
+            Email.id == req.db_id, Email.user_id == current_user.id
+        ).first()
+        if row and row.body:
+            body = row.body
+    summary = await generate_summary(req.subject, body)
     return _SummarizeResponse(summary=summary)
 
 
@@ -547,6 +558,29 @@ async def send_email_reply(
         raise HTTPException(status_code=502, detail=f"Email delivery failed: {exc}")
 
     return {"status": "sent", "resend_id": sent_id}
+
+
+@router.get("/emails/counts")
+def get_email_counts(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return per-category email counts for the authenticated user (single GROUP BY query)."""
+    from sqlalchemy import func
+    rows = (
+        db.query(Email.category, func.count(Email.id))
+        .filter(Email.user_id == current_user.id)
+        .group_by(Email.category)
+        .all()
+    )
+    counts = {(cat or "info"): n for cat, n in rows}
+    return {
+        "rdv":       counts.get("rdv", 0),
+        "action":    counts.get("action", 0),
+        "attente":   counts.get("attente", 0),
+        "bonsplans": counts.get("bonsplans", 0),
+        "info":      counts.get("info", 0),
+    }
 
 
 @router.get("/emails/{email_id}", response_model=EmailItem)

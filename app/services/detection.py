@@ -55,6 +55,7 @@ def detect_single(email: EmailInput) -> ExtractionResult:
     pre_cat = zero_shot_classify(email.sender, email.subject, email.body[:800], email.headers)
     if pre_cat is not None:
         from typing import cast  # noqa: PLC0415
+
         from app.schemas.detection import Classification  # noqa: PLC0415
         return ExtractionResult(classification=cast(Classification, pre_cat), confidence=0.9, needs_llm=False)
 

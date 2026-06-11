@@ -54,7 +54,10 @@ def detect_single(email: EmailInput) -> ExtractionResult:
     # Zero-shot pre-filter: short-circuit for obvious automated emails
     pre_cat = zero_shot_classify(email.sender, email.subject, email.body[:800], email.headers)
     if pre_cat is not None:
-        return ExtractionResult(classification=pre_cat, confidence=0.9, needs_llm=False)
+        from typing import cast  # noqa: PLC0415
+
+        from app.schemas.detection import Classification  # noqa: PLC0415
+        return ExtractionResult(classification=cast(Classification, pre_cat), confidence=0.9, needs_llm=False)
 
     # Run extractor on truncated text for speed
     truncated = EmailInput(
@@ -122,8 +125,8 @@ async def enrich_batch(
         for entry in await asyncio.gather(
             *[_reply(i) for i in reply_idx], return_exceptions=True
         ):
-            if not isinstance(entry, Exception):
-                idx, reply_text = entry
+            if not isinstance(entry, BaseException):
+                idx, reply_text = entry  # type: ignore[misc]
                 email_items[idx].suggested_reply = reply_text or None
 
 

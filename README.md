@@ -39,8 +39,13 @@ SECRET_KEY=<your-secret-key>
 # Never change this after first use — it will invalidate stored Apple passwords.
 SECRET_ENCRYPTION_KEY=<generated-fernet-key>
 
-# ── OpenAI (optional — NLP fallback when confidence is low) ───────────────────
+# ── OpenAI (optional — RDV metadata extraction + auto-reply drafting) ────────
 OPENAI_API_KEY=<your-openai-key>
+
+# ── textcat classifier (optional — local email classification, zero API cost) ──
+# Train once: poetry run python -m app.ML.export_training_data && poetry run python -m app.ML.train_textcat
+# TEXTCAT_MODEL_PATH=app/ML/models/iris_textcat   # default, no need to set unless custom
+# TEXTCAT_CONFIDENCE_THRESHOLD=0.65               # default
 
 # ── Google OAuth (Gmail + Calendar + Tasks) ───────────────────────────────────
 # Configured via credentials.json from Google Cloud Console — no .env vars needed
@@ -365,8 +370,15 @@ irisBackend/
 │   │   ├── auth_token_service.py       # Token creation/consumption for auth flows
 │   │   └── email_service.py            # SMTP email sending
 │   ├── nlp/
-│   │   ├── extractor.py                # Regex + dateparser NLP engine
+│   │   ├── extractor.py                # Regex + spaCy + textcat NLP engine
+│   │   ├── preprocessor.py             # Zero-shot pre-filter (noreply / unsubscribe)
+│   │   ├── textcat_classifier.py       # Singleton inference wrapper for trained textcat
 │   │   └── llm_fallback_openai.py      # GPT fallback when NLP confidence < 0.6
+│   ├── ML/
+│   │   ├── export_training_data.py     # DB → spaCy .spacy training corpus
+│   │   ├── train_textcat.py            # Train textcat + per-category F-score report
+│   │   ├── retrain_from_feedback.py    # Analyse user corrections → pattern suggestions
+│   │   └── configs/textcat.cfg         # TextCatEnsemble.v2 training config
 │   └── main.py                         # FastAPI app, router registration, CORS
 ├── tests/                              # pytest test suite
 ├── docs/                               # Integration setup guides

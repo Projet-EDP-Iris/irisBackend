@@ -46,6 +46,9 @@ SCHEDULE_EN = re.compile(
     r"\b(meeting|appointment|réunion|"
     r"(?:prendre?|fixer|planifier|notre|votre|un)\s+rendez-vous|"
     r"rendez-vous\s+(?:le\s+\d|à\s+\d{1,2}[h:]|avec|prévu|confirmé|téléphonique)|"
+    r"rendez\s+vous\b|"
+    r"soutenance|"
+    r"entretien\s+(?:prévu|le|demain|lundi|mardi|mercredi|jeudi|vendredi)|"
     r"schedule\s+a\s+(?:call|meeting|time|sync)|"
     r"book\s+a\s+(?:call|meeting|slot|time)|"
     r"set\s+up\s+a\s+(?:call|meeting|time|sync)|find\s+a\s+time|"
@@ -56,7 +59,7 @@ SCHEDULE_EN = re.compile(
     r"on\s+se\s+retrouve|faire\s+(?:un|le)\s+point|point\s+de\s+(?:situation|suivi)|"
     r"sync(?:hronisation)?|convocation|invitation\s+(?:à\s+la\s+)?réunion|"
     r"coffee\s+chat|virtual\s+coffee|grab\s+a\s+coffee|"
-    r"(?:lundi|mardi|mercredi|jeudi|vendredi)\s+(?:prochain|à\s+\d{1,2}[h:]\d{0,2}|\d{1,2}[h:]\d{0,2}|matin|soir|après-midi|midi)|"
+    r"(?:lundi|mardi|mercredi|jeudi|vendredi)\s+(?:prochain|à\s+\d{1,2}[h:]\d{0,2}|\d{1,2}[h:]\d{0,2}|\d{1,2}[/.]\d{1,2}|matin|soir|après-midi|midi)|"
     r"(?:monday|tuesday|wednesday|thursday|friday)\s+(?:at\s+\d{1,2}|next|morning|afternoon|evening)|"
     r"dispo\s+(?:lundi|mardi|mercredi|jeudi|vendredi|ce\s+soir|demain|la\s+semaine)|"
     r"tu\s+es\s+(?:dispo|libre|disponible)|"
@@ -253,21 +256,31 @@ def _apply_rdv_hierarchy(scores: dict[str, float]) -> dict[str, float]:
 
 
 def _classify(text: str, nlp=None) -> tuple[Classification, float, bool]:
-    """Classify text using the weighted scoring matrix across all regex patterns.
+    """Classify text through the three-layer pipeline.
+
+    Layer 1 — Regex scoring (fast, deterministic).
+    Layer 1.5 — spaCy textcat (trained, ~5 ms) — intercepts when regex
+                confidence < REGEX_STRONG_THRESHOLD and model is available.
+    Layer 2 — spaCy NER/morphology — legacy fallback when textcat is absent.
 
     Returns (classification, confidence, needs_llm).
 
-    confidence formula:
-        base = 0.5 + 0.4 * (top_score / total) + 0.1 * margin_ratio
-        where margin_ratio = (top - second) / total
-        Capped at 0.95.
-
-    needs_llm is True when no regex matched or confidence < LLM_CONFIDENCE_THRESHOLD.
+    needs_llm is True ONLY when:
+      - category is an rdv type (metadata extraction needed), or
+      - no layer produced a confident result.
+    General classification no longer triggers the LLM.
     """
     scores = _score_categories(text)
 
     if not scores:
-        # No regex hit — fall through to spaCy layer 2
+        # No regex hit — try textcat first, then legacy NER/morphology
+        result = _try_textcat(text)
+        if result is not None:
+            cat, conf = result
+            # For rdv, still need LLM for metadata (timezone/duration)
+            needs_llm = cat in ("rdv",) and conf >= settings.TEXTCAT_CONFIDENCE_THRESHOLD
+            return cat, conf, needs_llm
+
         if nlp is not None:
             try:
                 cls, conf = _classify_with_spacy(text, nlp)
@@ -287,7 +300,59 @@ def _classify(text: str, nlp=None) -> tuple[Classification, float, bool]:
 
     margin = (top_score - second_score) / total if total else 0.0
     confidence = min(0.5 + 0.4 * (top_score / total) + 0.1 * margin, 0.95)
+
+    # When regex is uncertain, give textcat a chance to override
+    if confidence < _REGEX_STRONG_THRESHOLD:
+        result = _try_textcat(text)
+        if result is not None:
+            tc_cat, tc_conf = result
+            if tc_conf >= settings.TEXTCAT_CONFIDENCE_THRESHOLD:
+                # Map textcat label back to a Classification value
+                tc_cls: Classification = _TEXTCAT_LABEL_TO_CLASSIFICATION.get(tc_cat, tc_cat)  # type: ignore[assignment]
+                needs_llm = tc_cls in ("meeting_schedule", "meeting_cancel", "meeting_reschedule")
+                return tc_cls, tc_conf, needs_llm
+
     return top_cat, confidence, confidence < settings.LLM_CONFIDENCE_THRESHOLD
+
+
+# Regex confidence threshold above which textcat is skipped.
+# Below this value the regex result is considered uncertain.
+_REGEX_STRONG_THRESHOLD = 0.80
+
+# textcat returns 5-label categories; map back to the 7 Classification values
+# used by the rest of the pipeline (meeting sub-types are collapsed to schedule
+# because textcat cannot distinguish cancel/reschedule — regex handles that).
+_TEXTCAT_LABEL_TO_CLASSIFICATION: dict[str, Classification] = {
+    "rdv":       "meeting_schedule",
+    "action":    "action",
+    "attente":   "attente",
+    "bonsplans": "bonsplans",
+    "info":      "info",
+}
+
+_textcat_clf = None
+
+
+def _try_textcat(text: str) -> tuple[str, float] | None:
+    """Run the textcat classifier if available. Returns (label, confidence) or None."""
+    global _textcat_clf
+    if _textcat_clf is None:
+        try:
+            from app.nlp.textcat_classifier import TextcatClassifier
+            _textcat_clf = TextcatClassifier()
+        except ImportError:
+            _textcat_clf = False  # type: ignore[assignment]
+
+    if not _textcat_clf:
+        return None
+
+    subject_end = text.find("\n")
+    if subject_end == -1:
+        subject, body = text, ""
+    else:
+        subject, body = text[:subject_end], text[subject_end + 1:]
+
+    return _textcat_clf.classify(subject, body)
 
 
 def classification_to_category(classification: str) -> str:

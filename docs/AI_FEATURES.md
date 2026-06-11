@@ -88,9 +88,27 @@ In summary mode, a "Voir l'original" toggle below the summary card reveals the f
 
 ---
 
+## Local classification (textcat — reduces OpenAI usage)
+
+A trained spaCy `TextCatEnsemble.v2` model intercepts emails where the regex layer was uncertain (confidence < 0.80). When the textcat model confidence is ≥ 0.65, the category is decided locally and **OpenAI is not called**.
+
+This reduces OpenAI calls from ~35–40% of all emails down to ~10% (RDV metadata only). The model runs fully offline at ~5ms per email once trained.
+
+Train the model with:
+```bash
+poetry run python -m app.ML.export_training_data   # export DB labels
+poetry run python -m app.ML.train_textcat           # train + evaluate
+```
+
+See [TRIAGE_ALGORITHM.md](TRIAGE_ALGORITHM.md) for the full training workflow.
+
+---
+
 ## Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
 | `OPENAI_API_KEY` | Yes (for AI features) | API key for gpt-4o-mini calls |
-| `LLM_CONFIDENCE_THRESHOLD` | No (default 0.75) | Confidence below which the classifier requests LLM reclassification |
+| `LLM_CONFIDENCE_THRESHOLD` | No (default 0.75) | Confidence below which the legacy NER fallback requests LLM reclassification |
+| `TEXTCAT_MODEL_PATH` | No (default `app/ML/models/iris_textcat`) | Path to the trained textcat model directory |
+| `TEXTCAT_CONFIDENCE_THRESHOLD` | No (default 0.65) | Minimum textcat confidence to accept its result over the LLM |

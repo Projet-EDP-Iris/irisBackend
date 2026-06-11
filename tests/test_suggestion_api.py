@@ -36,8 +36,12 @@ def reset_db():
 
 # ── /suggest-inline ─────────────────────────────────────────────────────────
 
+@pytest.mark.skipif(
+    not __import__("os").environ.get("OPENAI_API_KEY"),
+    reason="OPENAI_API_KEY not set — service returns empty variants without a key",
+)
 def test_suggest_inline_returns_200_with_variants():
-    """POST /suggest-inline must return 3 labelled variants."""
+    """POST /suggest-inline must return 3 labelled variants (requires OPENAI_API_KEY)."""
     response = client.post(
         "/api/v1/suggest-inline",
         json={

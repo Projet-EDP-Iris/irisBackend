@@ -4,7 +4,7 @@ Vérifie que chaque type d'email atterrit dans la bonne catégorie.
 """
 import pytest
 
-from app.nlp.extractor import EmailExtractor, _classify, classification_to_category
+from app.nlp.extractor import EmailExtractor, classification_to_category
 from app.schemas.detection import EmailInput
 
 

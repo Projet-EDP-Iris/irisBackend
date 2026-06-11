@@ -55,3 +55,7 @@ docker-compose.override.yml
 *.db-journal
 test.db
 
+
+# ML trained model binaries (retrain locally with: poetry run python -m app.ML.train_textcat)
+app/ML/models/
+app/ML/data/

@@ -56,6 +56,6 @@ def send_reply(req: ReplyRequest) -> str:
             for name, data in req.attachments
         ]
 
-    response = resend.Emails.send(params)
+    response = resend.Emails.send(params)  # type: ignore[arg-type]
     logger.info("Reply sent via Resend id=%s to=%s", response.get("id"), req.to)
     return response["id"]

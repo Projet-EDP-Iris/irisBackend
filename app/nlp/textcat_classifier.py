@@ -14,6 +14,7 @@ Usage:
 """
 import logging
 from pathlib import Path
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +31,14 @@ class TextcatClassifier:
     """
 
     _instance: "TextcatClassifier | None" = None
+    _nlp: "Any"  # spacy Language when loaded, None when not yet loaded
+    _available: bool | None  # None = not yet checked
 
     def __new__(cls) -> "TextcatClassifier":
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._nlp = None
-            cls._instance._available = None  # None = not yet checked
+            cls._instance._available = None
         return cls._instance
 
     @property

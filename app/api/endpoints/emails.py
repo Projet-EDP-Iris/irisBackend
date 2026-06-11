@@ -349,7 +349,7 @@ def get_email_feed(
                 rfc_message_id=r.get("rfc_message_id"),
                 sender=r.get("sender"),
                 date=r.get("date"),
-                category=existing_categories.get(r.get("message_id"), None),
+                category=existing_categories.get(r.get("message_id")) or "info",
                 provider="gmail",
             )
             for r in raw_list

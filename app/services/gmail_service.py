@@ -253,7 +253,7 @@ class GmailService:
                     "date": date,
                     "body": snippet,
                     "message_id": stub["id"],
-                    "rfc_message_id": rfc_msg_id,
+                    "rfc_message_id": rfc_msg_id or "",
                 })
             return email_data, next_token
         except Exception:
@@ -318,7 +318,7 @@ class GmailService:
                     "subject": subject,
                     "body": body,
                     "message_id": message_id,
-                    "rfc_message_id": rfc_msg_id,
+                    "rfc_message_id": rfc_msg_id or "",
                     "sender": sender,
                     "date": date,
                 })

@@ -1,6 +1,6 @@
 # Email Triage Algorithm
 
-Iris classifies each email into one of five UI tabs — **rdv**, **action**, **attente**, **bonsplans**, **info** — using a three-layer pipeline.
+Iris classifies each email into one of five UI tabs — **rdv**, **action**, **attente**, **bonsplans**, **info** — using a four-layer pipeline.
 
 ---
 
@@ -43,9 +43,26 @@ Email (subject + body + sender + headers)
 │    conf = 0.5 + 0.4*(top/total) + 0.1*margin│
 │    capped at 0.95                            │
 │                                              │
-│  If scores empty → fall through to spaCy    │
+│  If conf ≥ 0.80           → done (no LLM)   │
+│  If conf < 0.80           → try Layer 1.5   │
 └──────────────────────────────────────────────┘
-       │ low confidence or no scores
+       │ regex confidence < 0.80 or no match
+       ▼
+┌──────────────────────────────────────────────┐
+│  Layer 1.5: spaCy textcat (trained)          │  ~5ms · offline · zero API cost
+│  app/nlp/textcat_classifier.py               │
+│                                              │
+│  TextCatEnsemble.v2 trained on labeled       │
+│  emails from the DB (subject + body[:800]).  │
+│  5 output labels: rdv / action / attente /   │
+│  bonsplans / info.                           │
+│                                              │
+│  If conf ≥ TEXTCAT_CONFIDENCE_THRESHOLD      │
+│      → use textcat result, skip OpenAI       │
+│  If model not trained yet                    │
+│      → graceful fallback to Layer 1b        │
+└──────────────────────────────────────────────┘
+       │ textcat unavailable or low confidence
        ▼
 ┌──────────────────────────────────────────────┐
 │  Layer 1b: spaCy NER + morphology            │  slower · probabilistic
@@ -61,23 +78,21 @@ Email (subject + body + sender + headers)
   ExtractionResult
   ├── classification  (internal value)
   ├── confidence      (0.0 – 0.95)
-  ├── needs_llm       (True when conf < LLM_CONFIDENCE_THRESHOLD)
+  ├── needs_llm       (True only for rdv with incomplete metadata)
   └── metadata        (times, duration, link, participants — meeting types only)
        │
        ▼ (async, post-batch)
 ┌──────────────────────────────────────────────┐
-│  Layer 2: Async LLM batch enrichment         │  gpt-4o-mini · category only
+│  Layer 2: Async LLM enrichment               │  gpt-4o-mini · metadata only
 │  app/services/detection.py  enrich_batch()  │
 │                                              │
-│  Pass 1 — category reclassification:         │
-│    Emails with needs_llm=True are sent to    │
-│    gpt-4o-mini concurrently (asyncio.gather) │
-│    to correct the category label only.       │
+│  OpenAI is now called only for:              │
+│    · RDV emails missing timezone/duration   │
+│    · Auto-reply drafting (rdv/action/attente)│
 │                                              │
-│  Pass 2 — auto-reply drafting:               │
-│    rdv / action / attente emails (up to 20)  │
-│    get a suggested_reply generated in        │
-│    parallel, stored in EmailItem.            │
+│  General classification no longer goes to   │
+│  the LLM — textcat handles it instead.      │
+│  Expected reduction: ~35% → ~10% of emails. │
 └──────────────────────────────────────────────┘
 ```
 
@@ -126,7 +141,38 @@ Set via environment variable (default **0.75**):
 LLM_CONFIDENCE_THRESHOLD=0.75
 ```
 
-Emails below this threshold have `needs_llm=True` and enter the async LLM batch for category correction. The LLM receives only subject + first 800 chars of body and returns a JSON category label — it does not re-extract meeting metadata.
+With the textcat layer active, this threshold only matters for the legacy NER/morphology path (Layer 1b). The textcat layer uses its own threshold:
+
+```
+TEXTCAT_CONFIDENCE_THRESHOLD=0.65   # default — textcat result used when conf ≥ this
+TEXTCAT_MODEL_PATH=app/ML/models/iris_textcat   # default
+```
+
+---
+
+## Training the textcat model
+
+The textcat classifier uses labeled emails already in the database as training data. Run once after you have at least 100 emails per category:
+
+```bash
+cd irisBackend
+
+# Step 1 — export labeled emails from DB to spaCy binary format
+poetry run python -m app.ML.export_training_data
+# → app/ML/data/train.spacy + dev.spacy (80/20 split)
+# → prints per-category counts; warns if any category has < 100 examples
+
+# Step 2 — train (5–10 min on CPU)
+poetry run python -m app.ML.train_textcat
+# → trains TextCatEnsemble.v2 on fr_core_news_sm backbone
+# → prints per-category precision / recall / F1 on dev set
+# → saves model to app/ML/models/iris_textcat/model-best/
+
+# Step 3 — restart the backend
+# textcat auto-loads on first request; OpenAI calls will drop in logs
+```
+
+Target accuracy: macro F1 ≥ 80% on the dev set. More examples per category → higher accuracy.
 
 ---
 
@@ -140,4 +186,4 @@ python -m app.ML.retrain_from_feedback
 # → writes app/ML/feedback_patterns_report.json
 ```
 
-The report lists top misclassification transitions and the most frequent tokens per category. Add high-signal tokens to `_CATEGORY_PATTERNS` in `app/nlp/extractor.py`.
+The report lists top misclassification transitions and the most frequent tokens per category. Add high-signal tokens to `_CATEGORY_PATTERNS` in `app/nlp/extractor.py`. User corrections are also incorporated as **gold labels** the next time `export_training_data.py` is run, improving textcat accuracy over time.

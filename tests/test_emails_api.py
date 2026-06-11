@@ -9,6 +9,7 @@ from app.core.config import settings
 from app.db.database import get_db
 from app.main import app
 from app.models import Base
+from app.models.email import Email
 from app.models.user import User
 
 TEST_DATABASE_URL = "sqlite:///./test_emails.db"
@@ -205,3 +206,93 @@ def test_fetch_detect_predict_returns_emails_extractions_and_suggested_slots(
     assert len(data["extractions"]) == 1
     assert isinstance(data["suggested_slots"], list)
     assert data["extractions"][0]["classification"] == "meeting_schedule"
+
+
+# --- Server-side category filtering: /emails/cached?category= and /emails/counts ---
+
+
+def _seed_categorized_emails(user_email: str) -> None:
+    """Insert emails with known categories directly into the test DB."""
+    db = TestSessionLocal()
+    try:
+        user = db.query(User).filter_by(email=user_email).first()
+        db.add_all([
+            Email(subject="Réunion mardi", body="RDV à 10h", message_id="cat_1",
+                  user_id=user.id, status="fetched", category="rdv"),
+            Email(subject="Point projet", body="On se cale un créneau ?", message_id="cat_2",
+                  user_id=user.id, status="fetched", category="rdv"),
+            Email(subject="Valider le doc", body="Merci de signer avant vendredi", message_id="cat_3",
+                  user_id=user.id, status="fetched", category="action"),
+            Email(subject="-20% ce week-end", body="Code promo IRIS20", message_id="cat_4",
+                  user_id=user.id, status="fetched", category="bonsplans"),
+            Email(subject="Newsletter", body="Les infos du mois", message_id="cat_5",
+                  user_id=user.id, status="fetched", category=None),
+        ])
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_cached_emails_unauthorized(client_with_db, setup_database):
+    r = client_with_db.get("/api/v1/emails/cached")
+    assert r.status_code == 403
+
+
+def test_cached_emails_filters_by_category(client_with_db, setup_database, auth_headers):
+    _seed_categorized_emails("emails@example.com")
+    r = client_with_db.get("/api/v1/emails/cached?category=rdv", headers=auth_headers)
+    assert r.status_code == 200
+    emails = r.json()["emails"]
+    assert len(emails) == 2
+    assert all(e["category"] == "rdv" for e in emails)
+
+
+def test_cached_emails_without_category_returns_all(client_with_db, setup_database, auth_headers):
+    _seed_categorized_emails("emails@example.com")
+    r = client_with_db.get("/api/v1/emails/cached", headers=auth_headers)
+    assert r.status_code == 200
+    assert len(r.json()["emails"]) == 5
+
+
+def test_cached_emails_empty_category_returns_no_results(client_with_db, setup_database, auth_headers):
+    _seed_categorized_emails("emails@example.com")
+    r = client_with_db.get("/api/v1/emails/cached?category=attente", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["emails"] == []
+    assert r.json()["has_more"] is False
+
+
+def test_cached_emails_does_not_leak_other_users_emails(client_with_db, setup_database, auth_headers):
+    _seed_categorized_emails("emails@example.com")
+    db = TestSessionLocal()
+    try:
+        db.add(Email(subject="Other user RDV", body="x", message_id="other_1",
+                     user_id=99999, status="fetched", category="rdv"))
+        db.commit()
+    finally:
+        db.close()
+    r = client_with_db.get("/api/v1/emails/cached?category=rdv", headers=auth_headers)
+    assert r.status_code == 200
+    subjects = [e["subject"] for e in r.json()["emails"]]
+    assert "Other user RDV" not in subjects
+
+
+def test_counts_unauthorized(client_with_db, setup_database):
+    r = client_with_db.get("/api/v1/emails/counts")
+    assert r.status_code == 403
+
+
+def test_counts_returns_per_category_totals(client_with_db, setup_database, auth_headers):
+    _seed_categorized_emails("emails@example.com")
+    r = client_with_db.get("/api/v1/emails/counts", headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    # NULL category is reported as "info" so the frontend tab badges stay consistent
+    assert data["counts"] == {"rdv": 2, "action": 1, "bonsplans": 1, "info": 1}
+    assert data["total"] == 5
+
+
+def test_counts_empty_mailbox_returns_zero_total(client_with_db, setup_database, auth_headers):
+    r = client_with_db.get("/api/v1/emails/counts", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json() == {"counts": {}, "total": 0}

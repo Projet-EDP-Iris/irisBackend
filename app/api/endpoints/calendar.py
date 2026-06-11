@@ -366,7 +366,13 @@ def check_calendar_conflicts(
         elif provider == "outlook":
             raw = list_outlook_calendar_events(current_user.id, start, end)
         elif provider == "apple":
-            if current_user.apple_caldav_user and current_user.apple_caldav_password:
+            if not current_user.apple_caldav_user or not current_user.apple_caldav_password:
+                logger.warning(
+                    "Apple CalDAV not configured for user %d — no conflict check possible. "
+                    "User must add an App-Specific Password via Settings → Calendriers.",
+                    current_user.id,
+                )
+            else:
                 raw = list_apple_calendar_events(
                     current_user.apple_caldav_user,
                     current_user.apple_caldav_password,

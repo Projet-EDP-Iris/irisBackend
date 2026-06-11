@@ -276,16 +276,20 @@ async def post_fetch_detect_predict(
 def get_cached_emails(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    category: str | None = Query(default=None),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> EmailFeedResponse:
     """
     Return emails already stored in the DB for this user — no external API calls.
-    Used for instant first-paint before the background /emails/feed refresh completes.
+    Supports optional ?category= filter so each tab gets only its own emails.
+    Body is truncated to 500 chars for list views; use GET /emails/{id} for full body.
     """
+    query = db.query(Email).filter(Email.user_id == current_user.id)
+    if category:
+        query = query.filter(Email.category == category)
     rows = (
-        db.query(Email)
-        .filter(Email.user_id == current_user.id)
+        query
         .order_by(Email.received_at.desc())
         .offset(offset)
         .limit(limit + 1)
@@ -296,7 +300,7 @@ def get_cached_emails(
     items = [
         EmailItem(
             subject=row.subject or "",
-            body=row.body or "",
+            body=(row.body or "")[:500],
             message_id=row.message_id,
             rfc_message_id=row.rfc_message_id,
             sender=row.sender,
@@ -308,6 +312,7 @@ def get_cached_emails(
         for row in rows
     ]
     return EmailFeedResponse(emails=items, has_more=has_more)
+
 
 
 @router.get("/emails/feed", response_model=EmailFeedResponse)
@@ -398,6 +403,11 @@ def get_email_feed(
 
     if category:
         all_emails = [e for e in all_emails if e.category == category]
+
+    # Truncate body for list view — full body available via GET /emails/{id}
+    for e in all_emails:
+        if e.body and len(e.body) > 500:
+            e.body = e.body[:500]
 
     return EmailFeedResponse(
         emails=all_emails,
@@ -537,3 +547,26 @@ async def send_email_reply(
         raise HTTPException(status_code=502, detail=f"Email delivery failed: {exc}")
 
     return {"status": "sent", "resend_id": sent_id}
+
+
+@router.get("/emails/{email_id}", response_model=EmailItem)
+def get_email_detail(
+    email_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> EmailItem:
+    """Return a single email with its full body — used by the reading pane."""
+    row = db.query(Email).filter(Email.id == email_id, Email.user_id == current_user.id).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Email not found")
+    return EmailItem(
+        subject=row.subject or "",
+        body=row.body or "",
+        message_id=row.message_id,
+        rfc_message_id=row.rfc_message_id,
+        sender=row.sender,
+        db_id=row.id,
+        category=row.category or "info",
+        date=row.email_date,
+        provider=row.provider or "unknown",
+    )

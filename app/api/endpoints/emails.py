@@ -57,7 +57,7 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
         if existing:
             item.db_id = existing.id
             # Backfill metadata that may have been missing on first insert
-            if not existing.category and item.category:
+            if item.category and (not existing.category or existing.category == "info"):
                 existing.category = item.category
             if not existing.email_date and item.date:
                 existing.email_date = item.date
@@ -323,8 +323,8 @@ def get_email_feed(
     Fetches one page from Gmail (batch, metadata + snippet) and one page from Outlook.
     """
     # Pre-fetch known message IDs + stored categories to skip NLP for already-categorised emails.
-    existing_categories: dict[str, str] = {
-        row.message_id: (row.category or "info")
+    existing_categories: dict[str, str | None] = {
+        row.message_id: (row.category if row.category and row.category != "info" else None)
         for row in db.query(Email.message_id, Email.category)
             .filter(Email.user_id == current_user.id)
             .all()
@@ -349,7 +349,7 @@ def get_email_feed(
                 rfc_message_id=r.get("rfc_message_id"),
                 sender=r.get("sender"),
                 date=r.get("date"),
-                category=existing_categories.get(r.get("message_id")) or "info",
+                category=existing_categories.get(r.get("message_id")),
                 provider="gmail",
             )
             for r in raw_list

@@ -315,6 +315,7 @@ def get_email_feed(
     limit: int = 50,
     gmail_cursor: str | None = None,
     outlook_skip: int = 0,
+    category: str | None = None,
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> EmailFeedResponse:
@@ -343,19 +344,20 @@ def get_email_feed(
         gmail_ok = False
     if gmail_ok:
         raw_list, gmail_next_cursor = svc.fetch_email_page(page_token=gmail_cursor, limit=limit)
-        gmail_emails = [
-            EmailItem(
+        gmail_emails = []
+        for r in raw_list:
+            existing_cat = existing_categories.get(r.get("message_id"))
+            item = EmailItem(
                 subject=r["subject"],
                 body=r["body"],
                 message_id=r["message_id"],
                 rfc_message_id=r.get("rfc_message_id"),
                 sender=r.get("sender"),
                 date=r.get("date"),
-                category=existing_categories.get(r.get("message_id"), None),
                 provider="gmail",
+                **({"category": existing_cat} if existing_cat else {}),
             )
-            for r in raw_list
-        ]
+            gmail_emails.append(item)
 
     outlook_emails: list[EmailItem] = []
     outlook_has_more = False
@@ -375,7 +377,7 @@ def get_email_feed(
     all_emails = gmail_emails + outlook_emails
     all_emails.sort(key=lambda e: _sort_key(e.date), reverse=True)
 
-    uncategorized = [(i, it) for i, it in enumerate(all_emails) if not it.category]
+    uncategorized = [(i, it) for i, it in enumerate(all_emails) if it.message_id not in existing_ids]
     if uncategorized:
         with ThreadPoolExecutor(max_workers=min(8, len(uncategorized))) as executor:
             futures = {
@@ -393,6 +395,9 @@ def get_email_feed(
     has_more = (gmail_next_cursor is not None) or outlook_has_more
 
     _upsert_email_items(db, current_user.id, all_emails)
+
+    if category:
+        all_emails = [e for e in all_emails if e.category == category]
 
     return EmailFeedResponse(
         emails=all_emails,

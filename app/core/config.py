@@ -27,6 +27,8 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("OPENAI_API_KEY", "OPEN_AI_KEY"),
     )
     LLM_CONFIDENCE_THRESHOLD: float = Field(default=0.75)
+    TEXTCAT_MODEL_PATH: str = Field(default="app/ML/models/iris_textcat")
+    TEXTCAT_CONFIDENCE_THRESHOLD: float = Field(default=0.65)
 
     # Resend (transactional email)
     RESEND_API_KEY: str | None = Field(default=None)

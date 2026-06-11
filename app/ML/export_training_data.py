@@ -51,7 +51,8 @@ def _load_from_db() -> list[tuple[str, str]]:
       2. Email rows with category != null and extraction confidence > 0.70
     """
     try:
-        from sqlalchemy import create_engine, text as sql_text
+        from sqlalchemy import create_engine
+        from sqlalchemy import text as sql_text
         db_url = "sqlite:///" + str(ROOT / "test.db")
         engine = create_engine(db_url)
     except Exception as exc:

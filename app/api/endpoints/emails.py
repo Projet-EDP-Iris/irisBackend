@@ -1,9 +1,9 @@
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed as _as_completed
+import re as _re
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import as_completed as _as_completed
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime as _parsedate
-
-import re as _re
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
@@ -330,8 +330,6 @@ def get_email_feed(
             .all()
         if row.message_id
     }
-    existing_ids = set(existing_categories.keys())
-
     gmail_emails: list[EmailItem] = []
     gmail_next_cursor: str | None = None
 

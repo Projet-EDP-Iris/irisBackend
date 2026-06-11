@@ -7,6 +7,7 @@ from email.utils import parsedate_to_datetime as _parsedate
 
 from fastapi import APIRouter, Body, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel
+from sqlalchemy import func as _func
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
@@ -272,20 +273,44 @@ async def post_fetch_detect_predict(
     )
 
 
+@router.get("/emails/counts")
+def get_email_counts(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Return per-category email counts for tab badges."""
+    rows = (
+        db.query(Email.category, _func.count(Email.id))
+        .filter(Email.user_id == current_user.id)
+        .group_by(Email.category)
+        .all()
+    )
+    valid = {"rdv", "action", "attente", "bonsplans", "info"}
+    counts: dict[str, int] = {}
+    for cat, n in rows:
+        key = cat if cat in valid else "info"
+        counts[key] = counts.get(key, 0) + n
+    return {"counts": counts, "total": sum(counts.values())}
+
+
 @router.get("/emails/cached", response_model=EmailFeedResponse)
 def get_cached_emails(
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
+    category: str | None = Query(default=None),
     current_user: User = Depends(get_current_active_user),
     db: Session = Depends(get_db),
 ) -> EmailFeedResponse:
     """
     Return emails already stored in the DB for this user — no external API calls.
     Used for instant first-paint before the background /emails/feed refresh completes.
+    Optionally filter by category (for per-tab server-side filtering).
     """
+    query = db.query(Email).filter(Email.user_id == current_user.id)
+    if category:
+        query = query.filter(Email.category == category)
     rows = (
-        db.query(Email)
-        .filter(Email.user_id == current_user.id)
+        query
         .order_by(Email.received_at.desc())
         .offset(offset)
         .limit(limit + 1)

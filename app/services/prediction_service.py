@@ -55,6 +55,10 @@ def _candidates_from_proposed_times(
         start = _parse_window_start(tw, tz)
         if start is None:
             continue
+        # dateparser returns midnight when no time is mentioned — bump to 10 AM
+        # so the event lands in visible business hours rather than midnight
+        if start.hour == 0 and start.minute == 0:
+            start = start.set(hour=10, minute=0)
         end = start.add(minutes=duration_minutes)
         out.append((start, end, 0.9))
     return out

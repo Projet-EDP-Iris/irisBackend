@@ -5,7 +5,14 @@ from app.core.config import settings
 
 # Import Base and all models to ensure they're registered with Base.metadata
 # This MUST be done before calling Base.metadata.create_all()
-from app.models import AuthToken, Base, DetectionFeedback, User  # noqa: F401
+from app.models import (  # noqa: F401
+    AuthToken,
+    Base,
+    DetectionFeedback,
+    ProcessingState,
+    SyncState,
+    User,
+)
 
 _db_url = settings.DATABASE_URL
 # Render (and some other hosts) provide "postgres://" but SQLAlchemy 2.0
@@ -72,6 +79,10 @@ def init_db():
                 connection.execute(text("ALTER TABLE emails ADD COLUMN provider VARCHAR(20)"))
             if "sender" not in email_columns:
                 connection.execute(text("ALTER TABLE emails ADD COLUMN sender VARCHAR(255)"))
+            if "is_done" not in email_columns:
+                connection.execute(text(
+                    "ALTER TABLE emails ADD COLUMN is_done BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
 
             # Migrate from global unique on message_id → composite unique per (message_id, user_id).
             # Drop the old single-column index (may or may not exist depending on deployment age).

@@ -198,6 +198,52 @@ class GmailService:
         """Save token and optional gmail_email for an app user to the DB."""
         _save_gmail_token_to_db(user_id, creds.to_json(), gmail_email or "")
 
+    def _batch_fetch_messages(self, message_ids: list[str]) -> list[dict[str, str]]:
+        """Fetch subject/sender/date/snippet for a list of message ids using a single
+        batch HTTP request. Shared by fetch_email_page and fetch_history_since."""
+        if not message_ids or not self.service:
+            return []
+
+        results_map: dict = {}
+
+        def _on_response(request_id: str, response: Any, exception: Any) -> None:
+            if exception is None:
+                results_map[request_id] = response
+
+        batch = self.service.new_batch_http_request(callback=_on_response)
+        for mid in message_ids:
+            batch.add(
+                self.service.users().messages().get(
+                    userId="me",
+                    id=mid,
+                    format="full",
+                    fields="id,snippet,payload/headers",
+                ),
+                request_id=mid,
+            )
+        batch.execute()
+
+        email_data: list[dict[str, str]] = []
+        for mid in message_ids:
+            msg = results_map.get(mid)
+            if not msg:
+                continue
+            headers: list[dict[str, Any]] = msg.get("payload", {}).get("headers", [])
+            subject = next((h["value"] for h in headers if h["name"] == "Subject"), "")
+            sender = next((h["value"] for h in headers if h["name"] == "From"), "")
+            date = next((h["value"] for h in headers if h["name"] == "Date"), "")
+            rfc_msg_id = next((h["value"] for h in headers if h["name"].lower() == "message-id"), None)
+            snippet = msg.get("snippet", "")
+            email_data.append({
+                "subject": subject,
+                "sender": sender,
+                "date": date,
+                "body": snippet,
+                "message_id": mid,
+                "rfc_message_id": rfc_msg_id or "",
+            })
+        return email_data
+
     def fetch_email_page(
         self, page_token: str | None = None, limit: int = 50
     ) -> tuple[list[dict[str, str]], str | None]:
@@ -217,48 +263,65 @@ class GmailService:
             if not stubs:
                 return [], next_token
 
-            results_map: dict = {}
-
-            def _on_response(request_id: str, response: Any, exception: Any) -> None:
-                if exception is None:
-                    results_map[request_id] = response
-
-            batch = self.service.new_batch_http_request(callback=_on_response)
-            for stub in stubs:
-                batch.add(
-                    self.service.users().messages().get(
-                        userId="me",
-                        id=stub["id"],
-                        format="full",
-                        fields="id,snippet,payload/headers",
-                    ),
-                    request_id=stub["id"],
-                )
-            batch.execute()
-
-            email_data: list[dict[str, str]] = []
-            for stub in stubs:
-                msg = results_map.get(stub["id"])
-                if not msg:
-                    continue
-                headers: list[dict[str, Any]] = msg.get("payload", {}).get("headers", [])
-                subject = next((h["value"] for h in headers if h["name"] == "Subject"), "")
-                sender = next((h["value"] for h in headers if h["name"] == "From"), "")
-                date = next((h["value"] for h in headers if h["name"] == "Date"), "")
-                rfc_msg_id = next((h["value"] for h in headers if h["name"].lower() == "message-id"), None)
-                snippet = msg.get("snippet", "")
-                email_data.append({
-                    "subject": subject,
-                    "sender": sender,
-                    "date": date,
-                    "body": snippet,
-                    "message_id": stub["id"],
-                    "rfc_message_id": rfc_msg_id or "",
-                })
+            email_data = self._batch_fetch_messages([stub["id"] for stub in stubs])
             return email_data, next_token
         except Exception:
             logger.exception("Failed to fetch Gmail email page for account=%s", self.current_email or "unknown")
             return [], None
+
+    def get_history_id(self) -> str | None:
+        """Return the mailbox's current historyId — used as a sync cursor so the
+        next call can fetch only messages added since this point via history.list."""
+        if not self.service:
+            return None
+        try:
+            profile = self.service.users().getProfile(userId="me").execute()
+            return profile.get("historyId")
+        except Exception:
+            logger.exception("Failed to fetch Gmail profile historyId for account=%s", self.current_email or "unknown")
+            return None
+
+    def fetch_history_since(
+        self, start_history_id: str, limit: int = 50
+    ) -> tuple[list[dict[str, str]], str | None]:
+        """
+        Fetch only messages added since start_history_id using Gmail's incremental
+        History API, instead of re-listing the whole mailbox. Returns
+        (email_list, new_history_id) so the caller can persist the new cursor.
+
+        Raises on failure (e.g. HttpError 404 when start_history_id is too old/expired —
+        Gmail only retains history for ~1 week). Callers should catch and fall back to a
+        full fetch_email_page() + get_history_id() in that case.
+        """
+        if not self.service:
+            return [], None
+
+        message_ids: list[str] = []
+        new_history_id: str | None = start_history_id
+        page_token: str | None = None
+        while True:
+            kwargs: dict = {
+                "userId": "me",
+                "startHistoryId": start_history_id,
+                "historyTypes": "messageAdded",
+                "maxResults": 500,
+            }
+            if page_token:
+                kwargs["pageToken"] = page_token
+            result = self.service.users().history().list(**kwargs).execute()
+            new_history_id = result.get("historyId", new_history_id)
+            for record in result.get("history", []):
+                for added in record.get("messagesAdded", []):
+                    mid = added.get("message", {}).get("id")
+                    if mid:
+                        message_ids.append(mid)
+            page_token = result.get("nextPageToken")
+            if not page_token or len(message_ids) >= limit:
+                break
+
+        message_ids = message_ids[:limit]
+        email_data = self._batch_fetch_messages(message_ids)
+        return email_data, new_history_id
 
     def fetch_email_body(self, message_id: str) -> str:
         """Fetch the full body of a single Gmail email by message_id."""

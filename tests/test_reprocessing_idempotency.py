@@ -1,7 +1,7 @@
 """
 Regression test for the "emails get reclassified on every login" bug.
 
-Root cause (see /Users/dan/.claude/plans/context-iris-is-a-shimmering-donut.md, Part 1):
+Root cause:
   (a) no Gmail historyId / Outlook deltaLink cursor was ever persisted, so every
       sync fully re-listed the mailbox, and
   (b) sync_user_emails_background (the function called from the OAuth login

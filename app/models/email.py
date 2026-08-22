@@ -58,4 +58,4 @@ class Email(Base):
 
     # Terminal-state flag shared by all categories (see app/api/endpoints/processing_state.py
     # for how it feeds processed_by_category, and calendar.py / emails.py for what sets it).
-    is_done = Column(Boolean, default=False, nullable=False, server_default="0")
+    is_done = Column(Boolean, default=False, nullable=False, server_default="false")

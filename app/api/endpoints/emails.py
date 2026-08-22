@@ -101,10 +101,12 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
 
 def _load_existing_categories(db: Session, user_id: int) -> dict[str, str | None]:
     """Pre-load message_id -> stored category for a user, so callers can skip
-    reclassifying emails that already have a real (non-"info" placeholder)
-    category. Used to avoid re-running NLP/LLM detection on every call."""
+    reclassifying emails that already have a stored category. "info" is a real
+    classifier output (not a placeholder) so it counts as classified too --
+    otherwise every Info email gets re-detected on every call, defeating the
+    once-per-message idempotency guarantee."""
     return {
-        row.message_id: (row.category if row.category and row.category != "info" else None)
+        row.message_id: row.category
         for row in db.query(Email.message_id, Email.category)
             .filter(Email.user_id == user_id)
             .all()
@@ -617,7 +619,7 @@ def get_email_body(
             .filter(Email.user_id == current_user.id, Email.message_id == message_id)
             .first()
         )
-        if record and not record.is_done:
+        if record and record.category == "info" and not record.is_done:
             record.is_done = True
             db.commit()
 
@@ -640,6 +642,11 @@ def mark_email_done(
     )
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+    if record.category not in ("action", "attente", "bonsplans"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="mark-done only applies to action, attente, or bonsplans categories",
+        )
 
     record.is_done = True
     db.commit()

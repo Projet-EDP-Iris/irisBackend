@@ -276,7 +276,8 @@ class GmailService:
             return None
         try:
             profile = self.service.users().getProfile(userId="me").execute()
-            return profile.get("historyId")
+            history_id = profile.get("historyId")
+            return str(history_id) if history_id is not None else None
         except Exception:
             logger.exception("Failed to fetch Gmail profile historyId for account=%s", self.current_email or "unknown")
             return None

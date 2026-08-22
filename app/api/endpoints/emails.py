@@ -607,7 +607,9 @@ def get_email_body(
     """Fetch the full body of a single email. Used when opening a Gmail email from the feed.
 
     Opening an "Info" email is its natural terminal-state signal — the first time this
-    endpoint is called for a given message, mark the stored Email row as done.
+    endpoint is called for a given "Info" message, mark the stored Email row as done.
+    Other categories have their own dedicated terminal action (confirm/dismiss,
+    mark-done) and must not be silently marked done just by being opened.
     """
     if provider == "gmail":
         svc = GmailService()
@@ -620,7 +622,7 @@ def get_email_body(
             .filter(Email.user_id == current_user.id, Email.message_id == message_id)
             .first()
         )
-        if record and not record.is_done:
+        if record and record.category == "info" and not record.is_done:
             record.is_done = True
             db.commit()
 
@@ -673,7 +675,10 @@ def mark_email_read(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
 
     record.is_read = True
-    if (record.category or "info") == "info":
+    # Only a *stored* "info" category counts — an unclassified email (category is
+    # still None, detection hasn't run yet) must not be marked done just because
+    # it happens to fall back to the "info" tab display-wise.
+    if record.category == "info":
         record.is_done = True
     db.commit()
 

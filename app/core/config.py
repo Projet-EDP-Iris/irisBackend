@@ -30,10 +30,6 @@ class Settings(BaseSettings):
     TEXTCAT_MODEL_PATH: str = Field(default="app/ML/models/iris_textcat")
     TEXTCAT_CONFIDENCE_THRESHOLD: float = Field(default=0.65)
 
-    # Resend (transactional email)
-    RESEND_API_KEY: str | None = Field(default=None)
-    RESEND_FROM_EMAIL: str = Field(default="noreply@iris-app.com")
-
     # Gmail OAuth (optional; for OAuth callback flow)
     GOOGLE_CLIENT_ID: str | None = Field(default=None)
     GOOGLE_CLIENT_SECRET: str | None = Field(default=None)
@@ -52,6 +48,10 @@ class Settings(BaseSettings):
     MICROSOFT_TENANT_ID: str = Field(default="common")
     # "common" allows any Microsoft/Outlook account; set a specific tenant ID for org-only
     MICROSOFT_REDIRECT_URI: str = Field(default="http://localhost:8000/api/v1/auth/microsoft/callback")
+
+    # GitHub — bug report integration
+    GITHUB_TOKEN: str = Field(default="")
+    GITHUB_REPO: str = Field(default="")
 
     # Frontend URL — used in email links
     FRONTEND_URL: str = Field(default="http://localhost:5173")

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user, get_verified_user
+from app.core.captcha import verify_turnstile
 from app.core.config import settings
 from app.core.encryption import encrypt
 from app.core.security import create_access_token, hash_password, verify_password
@@ -11,7 +12,6 @@ from app.models.auth_token import TokenType
 from app.models.user import User
 from app.schemas.auth import ChangePasswordRequest, MessageResponse
 from app.schemas.user import LoginRequest, Token, UserCreate, UserResponse, UserUpdate
-from app.core.captcha import verify_turnstile
 from app.services.auth_token_service import create_token
 from app.services.email_service import send_verification_email
 

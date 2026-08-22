@@ -88,10 +88,11 @@ def test_get_emails_unauthorized(client_with_db, setup_database):
 
 @patch("app.services.gmail_service._load_gmail_token_from_db", return_value=None)
 @patch("app.services.outlook_email_service._load_outlook_token_from_db", return_value=None)
-def test_get_emails_not_connected_returns_404(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+def test_get_emails_not_connected_returns_empty_list(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+    """No mailbox connected → returns 200 with empty list (frontend shows onboarding state)."""
     r = client_with_db.get("/api/v1/emails", headers=auth_headers)
-    assert r.status_code == 404
-    assert "email provider" in r.json().get("detail", "").lower()
+    assert r.status_code == 200
+    assert r.json() == []
 
 
 @patch("app.api.endpoints.emails.is_outlook_connected", return_value=False)
@@ -139,9 +140,12 @@ def test_fetch_and_detect_unauthorized(client_with_db, setup_database):
 
 @patch("app.services.gmail_service._load_gmail_token_from_db", return_value=None)
 @patch("app.services.outlook_email_service._load_outlook_token_from_db", return_value=None)
-def test_fetch_and_detect_not_connected_returns_404(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+def test_fetch_and_detect_not_connected_returns_empty(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+    """No mailbox connected → returns 200 with empty emails and extractions."""
     r = client_with_db.post("/api/v1/emails/fetch-and-detect", headers=auth_headers)
-    assert r.status_code == 404
+    assert r.status_code == 200
+    assert r.json()["emails"] == []
+    assert r.json()["extractions"] == []
 
 
 @patch("app.api.endpoints.emails.is_outlook_connected", return_value=False)
@@ -176,9 +180,12 @@ def test_fetch_detect_predict_unauthorized(client_with_db, setup_database):
 
 @patch("app.services.gmail_service._load_gmail_token_from_db", return_value=None)
 @patch("app.services.outlook_email_service._load_outlook_token_from_db", return_value=None)
-def test_fetch_detect_predict_not_connected_returns_404(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+def test_fetch_detect_predict_not_connected_returns_empty(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+    """No mailbox connected → returns 200 with empty structure."""
     r = client_with_db.post("/api/v1/emails/fetch-detect-predict", headers=auth_headers)
-    assert r.status_code == 404
+    assert r.status_code == 200
+    assert r.json()["emails"] == []
+    assert r.json()["extractions"] == []
 
 
 @patch("app.api.endpoints.emails.is_outlook_connected", return_value=False)

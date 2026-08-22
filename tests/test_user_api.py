@@ -139,7 +139,7 @@ def test_login_success():
     assert len(data["access_token"]) > 0
 
 def test_login_unverified_user():
-    """Test that login is blocked for unverified users"""
+    """Unverified users can now login — email verification is no longer required to access the app."""
     client.post(
         f"{BASE}/",
         json={
@@ -148,8 +148,7 @@ def test_login_unverified_user():
             "role": "regular"
         }
     )
-    # Do NOT verify email
-
+    # Do NOT verify email — login should still succeed
     response = client.post(
         f"{BASE}/login",
         json={
@@ -157,8 +156,8 @@ def test_login_unverified_user():
             "password": TEST_USER_PASSWORD
         }
     )
-    assert response.status_code == 403
-    assert "verified" in response.json()["detail"].lower()
+    assert response.status_code == 200
+    assert "access_token" in response.json()
 
 def test_login_wrong_password():
     """Test login with wrong password returns 401"""

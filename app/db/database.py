@@ -83,6 +83,10 @@ def init_db():
                 connection.execute(text(
                     "ALTER TABLE emails ADD COLUMN is_done BOOLEAN NOT NULL DEFAULT FALSE"
                 ))
+            if "is_read" not in email_columns:
+                connection.execute(text(
+                    "ALTER TABLE emails ADD COLUMN is_read BOOLEAN NOT NULL DEFAULT FALSE"
+                ))
 
             # Migrate from global unique on message_id → composite unique per (message_id, user_id).
             # Drop the old single-column index (may or may not exist depending on deployment age).

@@ -396,6 +396,9 @@ def get_cached_emails(
             category=row.category or "info",
             date=row.email_date,
             provider=row.provider or "unknown",
+            is_done=row.is_done,
+            is_read=row.is_read,
+            status=row.status,
         )
         for row in rows
     ]
@@ -645,6 +648,36 @@ def mark_email_done(
     db.commit()
 
     return {"status": "done", "email_id": email_id}
+
+
+@router.post("/emails/{email_id}/mark-read")
+def mark_email_read(
+    email_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Mark an email as opened/read — persisted so the "Lu" badge (and per-category
+    action state, via is_done) survive logout/login, unlike the old local-only
+    frontend state.
+
+    For "Info" category emails, opening is also the natural terminal-state signal
+    (see get_email_body's Gmail-only equivalent above) — setting it here too makes
+    that work uniformly for every provider, not just Gmail.
+    """
+    record = (
+        db.query(Email)
+        .filter(Email.id == email_id, Email.user_id == current_user.id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+
+    record.is_read = True
+    if (record.category or "info") == "info":
+        record.is_done = True
+    db.commit()
+
+    return {"status": "read", "email_id": email_id, "is_done": record.is_done}
 
 
 class _SummarizeRequest(BaseModel):

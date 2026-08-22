@@ -177,10 +177,9 @@ def _get_all_emails_for_user(user_id: int, max_results: int | None = None) -> li
     outlook_connected = is_outlook_connected(user_id)
 
     if not gmail_connected and not outlook_connected:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No email provider connected. Please connect Gmail or Outlook.",
-        )
+        # No mailbox connected yet — return empty list so the frontend can show
+        # an onboarding/connect-your-mailbox state instead of an error screen.
+        return []
 
     emails: list[EmailItem] = []
 

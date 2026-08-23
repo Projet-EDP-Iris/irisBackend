@@ -113,6 +113,47 @@ async def generate_summary(subject: str, body: str) -> str:
         return ""
 
 
+_ACTION_STEPS_SYSTEM = (
+    "You are an assistant that turns an email into a short actionable plan. "
+    "Read the email and return a JSON array of 3-6 short, concrete step strings "
+    "the recipient should take to fully handle it. "
+    "Detect the language of the email and write the steps in THAT SAME language. "
+    "Return ONLY the JSON array of strings, no other text."
+)
+
+
+async def generate_action_steps(subject: str, body: str) -> list[str]:
+    """Generate a short list of suggested next steps for an 'action' category email.
+
+    Returns an empty list if OpenAI is unavailable or on any error.
+    """
+    if not settings.OPENAI_API_KEY:
+        return []
+
+    try:
+        from openai import AsyncOpenAI
+        client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        resp = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": _ACTION_STEPS_SYSTEM},
+                {"role": "user", "content": f"Subject: {subject[:200]}\n\n{body[:1500]}"},
+            ],
+            max_tokens=300,
+            temperature=0.4,
+        )
+        content = resp.choices[0].message.content
+        if not content:
+            return []
+        steps = json.loads(content)
+        if isinstance(steps, list) and all(isinstance(s, str) for s in steps):
+            return steps
+    except Exception:
+        pass
+
+    return []
+
+
 async def generate_mail_suggestions(summary: str) -> list[dict]:
     """Generate three reply variants (Amical / Formel / Court) for an email summary.
 

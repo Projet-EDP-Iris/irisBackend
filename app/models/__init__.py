@@ -3,6 +3,16 @@ from app.models.auth_token import AuthToken
 from app.models.base import Base
 from app.models.email import Email
 from app.models.feedback import DetectionFeedback
+from app.models.processing_state import ProcessingState
+from app.models.sync_state import SyncState
 from app.models.user import User
 
-__all__ = ["AuthToken", "Base", "Email", "DetectionFeedback", "User"]
+__all__ = [
+    "AuthToken",
+    "Base",
+    "Email",
+    "DetectionFeedback",
+    "ProcessingState",
+    "SyncState",
+    "User",
+]

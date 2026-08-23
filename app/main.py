@@ -3,10 +3,12 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 
 from app.api.endpoints.calendar import router as calendar_router
 from app.api.endpoints.emails import router as email_router
 from app.api.endpoints.prediction import router as prediction_router
+from app.api.endpoints.processing_state import router as processing_state_router
 from app.api.endpoints.suggestion import router as suggestion_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.auth_apple import router as apple_auth_router
@@ -43,6 +45,7 @@ app = FastAPI(
         {"name": "prediction", "description": "Suggested meeting slots output."},
         {"name": "suggestion", "description": "AI-generated email response suggestions."},
         {"name": "calendar", "description": "One-click calendar event creation (Google, Apple, Outlook)."},
+        {"name": "processing-state", "description": "Persisted Iris on/off state and processing progress."},
         {"name": "auth", "description": "OAuth flows — Microsoft/Outlook account connection."},
     ],
 )
@@ -53,15 +56,19 @@ ALLOWED_ORIGINS = [
     "http://localhost:8080",
     "https://one-page-site-nine.vercel.app",
     "https://one-page-site-ten.vercel.app",
-    "null",  # Packaged Electron .exe loads from file://, which sends Origin: null
 ]
 
-if os.getenv("ENVIRONMENT") != "production":
+if settings.ENVIRONMENT.lower() != "production":
+    # Electron loads file:// pages with Origin: null; never permit that origin in production.
+    ALLOWED_ORIGINS.append("null")
     ALLOWED_ORIGINS.extend([
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:8080",
     ])
+
+if settings.ENVIRONMENT.lower() == "production":
+    app.add_middleware(HTTPSRedirectMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -90,6 +97,7 @@ app.include_router(email_router, prefix="/api/v1", tags=["emails"])
 app.include_router(prediction_router, prefix="/api/v1", tags=["predictions"])
 app.include_router(suggestion_router, prefix="/api/v1", tags=["suggestions"])
 app.include_router(calendar_router, prefix="/api/v1", tags=["calendar"])
+app.include_router(processing_state_router, prefix="/api/v1", tags=["processing-state"])
 app.include_router(auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(apple_auth_router, prefix="/api/v1", tags=["auth"])
 app.include_router(google_auth_router, prefix="/api/v1", tags=["auth"])

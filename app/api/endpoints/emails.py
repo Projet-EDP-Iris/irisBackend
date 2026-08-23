@@ -114,6 +114,24 @@ def _load_existing_categories(db: Session, user_id: int) -> dict[str, str | None
     }
 
 
+def _hydrate_persisted_state(db: Session, items: list[EmailItem]) -> None:
+    """After _upsert_email_items has populated item.db_id, copy each row's
+    persisted is_done/is_read/status onto the response item. Without this,
+    /emails and /emails/feed silently reset those badges/actions to their
+    defaults on every refresh -- only /emails/cached applied them."""
+    ids = [it.db_id for it in items if it.db_id]
+    if not ids:
+        return
+    rows = db.query(Email.id, Email.is_done, Email.is_read, Email.status).filter(Email.id.in_(ids)).all()
+    by_id = {row.id: row for row in rows}
+    for it in items:
+        row = by_id.get(it.db_id) if it.db_id else None
+        if row:
+            it.is_done = row.is_done
+            it.is_read = row.is_read
+            it.status = row.status
+
+
 def _get_gmail_emails(user_id: int, max_results: int | None = None) -> list[EmailItem]:
     """Fetch emails from Gmail. Returns empty list if not connected or on error."""
     svc = GmailService()
@@ -215,6 +233,7 @@ def get_emails(
             for future in _as_completed(futures):
                 items[futures[future]].category = future.result()
     _upsert_email_items(db, current_user.id, items)
+    _hydrate_persisted_state(db, items)
     return items
 
 
@@ -398,6 +417,9 @@ def get_cached_emails(
             category=row.category or "info",
             date=row.email_date,
             provider=row.provider or "unknown",
+            is_done=row.is_done,
+            is_read=row.is_read,
+            status=row.status,
         )
         for row in rows
     ]
@@ -481,6 +503,7 @@ def get_email_feed(
     has_more = (gmail_next_cursor is not None) or outlook_has_more
 
     _upsert_email_items(db, current_user.id, all_emails)
+    _hydrate_persisted_state(db, all_emails)
 
     return EmailFeedResponse(
         emails=all_emails,
@@ -606,7 +629,9 @@ def get_email_body(
     """Fetch the full body of a single email. Used when opening a Gmail email from the feed.
 
     Opening an "Info" email is its natural terminal-state signal — the first time this
-    endpoint is called for a given message, mark the stored Email row as done.
+    endpoint is called for a given "Info" message, mark the stored Email row as done.
+    Other categories have their own dedicated terminal action (confirm/dismiss,
+    mark-done) and must not be silently marked done just by being opened.
     """
     if provider == "gmail":
         svc = GmailService()
@@ -652,6 +677,39 @@ def mark_email_done(
     db.commit()
 
     return {"status": "done", "email_id": email_id}
+
+
+@router.post("/emails/{email_id}/mark-read")
+def mark_email_read(
+    email_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Mark an email as opened/read — persisted so the "Lu" badge (and per-category
+    action state, via is_done) survive logout/login, unlike the old local-only
+    frontend state.
+
+    For "Info" category emails, opening is also the natural terminal-state signal
+    (see get_email_body's Gmail-only equivalent above) — setting it here too makes
+    that work uniformly for every provider, not just Gmail.
+    """
+    record = (
+        db.query(Email)
+        .filter(Email.id == email_id, Email.user_id == current_user.id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+
+    record.is_read = True
+    # Only a *stored* "info" category counts — an unclassified email (category is
+    # still None, detection hasn't run yet) must not be marked done just because
+    # it happens to fall back to the "info" tab display-wise.
+    if record.category == "info":
+        record.is_done = True
+    db.commit()
+
+    return {"status": "read", "email_id": email_id, "is_done": record.is_done}
 
 
 class _SummarizeRequest(BaseModel):

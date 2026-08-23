@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     # Frontend URL — used in email links
     FRONTEND_URL: str = Field(default="http://localhost:5173")
 
+    # Cloudflare Turnstile CAPTCHA (protège POST /users/ contre les inscriptions automatisées)
+    TURNSTILE_ENABLED: bool = Field(default=False)
+    TURNSTILE_SECRET_KEY: str | None = Field(default=None)
+
     # Email (SMTP) — set EMAIL_ENABLED=true and configure SMTP to send real emails
     EMAIL_ENABLED: bool = Field(default=False)
     SMTP_HOST: str = Field(default="smtp.gmail.com")

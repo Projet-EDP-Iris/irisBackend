@@ -17,7 +17,6 @@ import logging
 
 import httpx
 
-from app.schemas.detection import EmailInput as DetectionEmailInput
 from app.schemas.email import EmailItem
 from app.services.microsoft_oauth_service import _load_outlook_token_from_db, get_valid_token
 
@@ -60,10 +59,11 @@ def _parse_email_item(msg: dict) -> EmailItem:
     # RFC 2822 Message-ID header — Graph returns this as internetMessageId
     rfc_message_id = msg.get("internetMessageId")
 
-    # Import here to avoid circular import (detection → extractor, not outlook → detection)
-    from app.services.detection import categorize_email  # noqa: PLC0415
-    category = categorize_email(DetectionEmailInput(subject=subject, body=body))
-
+    # NOTE: classification intentionally does NOT happen here. Parsing should only
+    # produce the raw EmailItem — categorize_email() used to be called unconditionally
+    # at parse time, which meant every single page fetch reclassified Outlook mail
+    # regardless of caller. Classification now happens once, centrally, at the same
+    # existing-category-aware call sites Gmail already uses (see app/api/endpoints/emails.py).
     return EmailItem(
         subject=subject,
         body=body,
@@ -71,7 +71,7 @@ def _parse_email_item(msg: dict) -> EmailItem:
         rfc_message_id=rfc_message_id,
         sender=sender,
         date=date,
-        category=category,
+        category=None,
         provider="outlook",
     )
 
@@ -152,6 +152,56 @@ def fetch_outlook_email_page(
     messages = data.get("value", [])
     has_more = "@odata.nextLink" in data or len(messages) == limit
     return [_parse_email_item(m) for m in messages], has_more
+
+
+def fetch_outlook_delta(
+    user_id: int, delta_link: str | None = None, limit: int = 50
+) -> tuple[list[EmailItem], str | None]:
+    """
+    Fetch new/changed Outlook messages using Microsoft Graph's delta query, instead
+    of a full $skip/$top mailbox listing on every sync.
+
+    Pass delta_link=None to start a fresh delta baseline (fetches recent inbox
+    messages, same shape as fetch_outlook_email_page); pass a previously stored
+    @odata.deltaLink to fetch only messages added/changed since the last sync.
+
+    Returns (emails, new_delta_link) — the caller should persist new_delta_link
+    (e.g. in SyncState) and pass it back in on the next sync.
+    """
+    access_token = get_valid_token(user_id)
+
+    if delta_link:
+        next_url: str | None = delta_link
+        params: dict | None = None
+    else:
+        next_url = f"{_GRAPH_BASE}/me/mailFolders/inbox/messages/delta"
+        params = {"$select": _SELECT, "$top": str(limit)}
+
+    all_messages: list[dict] = []
+    new_delta_link: str | None = None
+    while next_url:
+        resp = httpx.get(
+            next_url,
+            params=params,
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Prefer": 'outlook.body-content-type="text"',
+            },
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        all_messages.extend(data.get("value", []))
+        params = None  # nextLink/deltaLink already contain all query params
+        new_delta_link = data.get("@odata.deltaLink", new_delta_link)
+        next_url = data.get("@odata.nextLink")
+
+        if delta_link is None and len(all_messages) >= limit:
+            all_messages = all_messages[:limit]
+            break
+
+    logger.info("Fetched %d Outlook messages via delta for user_id=%d", len(all_messages), user_id)
+    return [_parse_email_item(m) for m in all_messages], new_delta_link
 
 
 def get_outlook_connection_status(user_id: int) -> dict:

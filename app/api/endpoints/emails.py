@@ -26,13 +26,13 @@ from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserP
 from app.services.detection import categorize_email, detect_batch, enrich_batch
 from app.services.gmail_service import GmailService
 from app.services.google_tasks_service import create_google_task
-from app.services.outlook_tasks_service import create_outlook_task
 from app.services.outlook_email_service import (
     fetch_outlook_delta,
     fetch_outlook_email_page,
     fetch_outlook_emails,
     is_outlook_connected,
 )
+from app.services.outlook_tasks_service import create_outlook_task
 from app.services.prediction_service import get_suggested_slots
 
 router = APIRouter(tags=["emails"])
@@ -890,7 +890,7 @@ async def send_email_reply(
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
-        logger.exception("Resend error for email_id=%d", email_id)
+        logger.exception("SMTP error for email_id=%d", email_id)
         raise HTTPException(status_code=502, detail=f"Email delivery failed: {exc}")
 
     return {"status": "sent", "resend_id": sent_id}

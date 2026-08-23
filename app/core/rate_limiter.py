@@ -33,5 +33,9 @@ class InMemoryRateLimiter:
             return max(0, int((oldest + self.window - now).total_seconds()))
 
 
-# 3 requests per 15 minutes per IP
+# Sensitive authentication paths are deliberately throttled in addition to the
+# password-reset limit. In-memory state is suitable for one process; production
+# deployments with several workers should replace this with a shared store.
 forgot_password_limiter = InMemoryRateLimiter(max_requests=3, window_seconds=900)
+login_limiter = InMemoryRateLimiter(max_requests=5, window_seconds=900)
+registration_limiter = InMemoryRateLimiter(max_requests=5, window_seconds=3600)

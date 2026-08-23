@@ -1,6 +1,7 @@
 import logging
 import smtplib
 import ssl
+import uuid
 from dataclasses import dataclass, field
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -60,6 +61,6 @@ def send_reply(req: ReplyRequest) -> str:
         server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
         server.sendmail(settings.SMTP_FROM_EMAIL, req.to, msg.as_string())
 
-    synthetic_id = f"<smtp-reply-{id(req)}@iris>"
+    synthetic_id = f"<smtp-reply-{uuid.uuid4()}@iris>"
     logger.info("Reply sent via SMTP to=%s subject=%r", req.to, subject)
     return synthetic_id

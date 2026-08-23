@@ -1,5 +1,5 @@
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     # API Settings
     API_V1_STR: str = "/api/v1"
     PROJECT_NAME: str = "Iris"
+    ENVIRONMENT: str = Field(default="development")
 
     # Database Settings
     DATABASE_URL: str = Field(default="sqlite:///./test.db")
@@ -68,6 +69,16 @@ class Settings(BaseSettings):
     # Token expiry
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = Field(default=30)
     EMAIL_VERIFICATION_TOKEN_EXPIRE_HOURS: int = Field(default=24)
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> "Settings":
+        if self.ENVIRONMENT.lower() == "production":
+            if self.SECRET_KEY == "test-secret" or len(self.SECRET_KEY) < 32:
+                raise ValueError("SECRET_KEY must be a strong, non-default value in production")
+            if not self.FRONTEND_URL.startswith("https://"):
+                raise ValueError("FRONTEND_URL must use HTTPS in production")
+        return self
+
 
 settings = Settings()
 

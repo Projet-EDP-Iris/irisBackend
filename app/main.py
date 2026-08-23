@@ -1,4 +1,5 @@
 import logging
+import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -57,7 +58,7 @@ ALLOWED_ORIGINS = [
     "null",  # Packaged Electron .exe loads from file://, which sends Origin: null
 ]
 
-if os.getenv("ENVIRONMENT") != "production":
+if os.getenv("ENVIRONMENT", "development") != "production":
     ALLOWED_ORIGINS.extend([
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",

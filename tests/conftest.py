@@ -8,16 +8,12 @@ override from the test's own module before each test.
 """
 import pytest
 
-from app.core.rate_limiter import forgot_password_limiter, login_limiter, registration_limiter
 from app.db.database import get_db
 from app.main import app
 
 
 @pytest.fixture(autouse=True)
 def set_db_override(request):
-    forgot_password_limiter._buckets.clear()
-    login_limiter._buckets.clear()
-    registration_limiter._buckets.clear()
     module = request.module
     if hasattr(module, "override_get_db"):
         app.dependency_overrides[get_db] = module.override_get_db

@@ -10,7 +10,7 @@ Date : 23 aout 2026. Perimetre : irisBackend et irisFrontendApp.
 | Elevee | La connexion et l inscription ne sont pas limitees ; seul le reset de mot de passe l etait. | Corrige dans la PR de durcissement associee. |
 | Elevee | L origine CORS null est acceptee y compris en production. | Corrige dans la PR de durcissement associee. |
 | Moyenne | HTTPS n est pas redirige explicitement par l application en production. | Corrige dans la PR de durcissement associee. |
-| Moyenne | Le scanning de secrets GitHub est desactive. | Action d organisation requise. |
+| Critique | Un fichier .env apparait dans l historique Git et GitHub Secret Scanning est desactive. | Assainissement et rotation des secrets requis. |
 | Moyenne | Aucun CAPTCHA n est en place pour inscription/connexion. | A planifier apres choix Turnstile ou hCaptcha. |
 | Faible | Aucun mecanisme de rotation/revocation de JWT d acces n est present. | A traiter avec un cycle refresh-token si la duree de session augmente. |
 
@@ -21,7 +21,7 @@ Date : 23 aout 2026. Perimetre : irisBackend et irisFrontendApp.
 - Les erreurs email inconnu et mot de passe incorrect ont le meme message.
 - Les JWT sont signes en HS256 et expirent ; les jetons invalides sont rejetes.
 - Une limitation en memoire existe pour la recuperation de mot de passe, mais elle ne protegeait ni inscription ni login.
-- L API GitHub indique que Secret Scanning est desactive. Une revue des noms de fichiers de l historique ne revele pas de fichier de secrets suivi, mais elle ne remplace pas un scan de contenu.
+- L API GitHub indique que Secret Scanning est desactive. La revue des noms de fichiers de l historique revele un fichier .env ; son contenu n a pas ete affiche. Il doit etre considere comme potentiellement expose jusqu a la rotation de tous les secrets.
 
 ## Correctifs appliques separement
 
@@ -37,7 +37,7 @@ La PR de durcissement associee ajoute :
 
 ## Actions de production requises
 
-- Activer GitHub Secret Scanning et lancer un scan d historique (Gitleaks ou equivalent) sans afficher ni recopier de secrets.
+- Revoquer et remplacer immediatement chaque secret qui a pu figurer dans le .env historique, puis purger l historique avec git-filter-repo et coordonner le force-push. Activer ensuite GitHub Secret Scanning et lancer Gitleaks sans afficher ni recopier de secrets.
 - Definir une SECRET_KEY aleatoire d au moins 32 caracteres, ainsi que les secrets OAuth, uniquement dans le gestionnaire de secrets du deploiement.
 - Mettre ENVIRONMENT=production et utiliser des URL https pour le frontend et les redirections OAuth.
 - Placer l API derriere un proxy TLS de confiance et configurer les en-tetes proxy avant de deployer la redirection HTTPS.

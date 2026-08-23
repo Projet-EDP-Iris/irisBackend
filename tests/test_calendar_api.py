@@ -465,3 +465,54 @@ class TestConfirmCalendar:
 
         assert r.status_code == 502
         assert "quota exceeded" in r.json()["detail"].lower()
+
+
+class TestDismissCalendar:
+    """POST /api/v1/calendar/dismiss/{email_id} — only applies to RDV emails."""
+
+    def _seed_email(self, category: str | None) -> int:
+        db = TestSession()
+        try:
+            user = db.query(User).filter(User.email == USER_EMAIL).first()
+            email = Email(
+                message_id=f"dismiss_test_{category}",
+                user_id=user.id,
+                subject="Test",
+                body="Body",
+                status="fetched",
+                category=category,
+            )
+            db.add(email)
+            db.commit()
+            db.refresh(email)
+            return email.id
+        finally:
+            db.close()
+
+    def test_dismiss_rdv_email_succeeds(self):
+        token = _create_and_login()
+        email_id = self._seed_email("rdv")
+
+        r = client.post(f"/api/v1/calendar/dismiss/{email_id}", headers=_auth(token))
+        assert r.status_code == 200
+        assert r.json() == {"status": "dismissed", "email_id": email_id}
+
+        db = TestSession()
+        try:
+            record = db.query(Email).filter_by(id=email_id).first()
+            assert record.status == "dismissed"
+            assert record.is_done is True
+        finally:
+            db.close()
+
+    def test_dismiss_non_rdv_email_returns_400(self):
+        token = _create_and_login()
+        email_id = self._seed_email("action")
+
+        r = client.post(f"/api/v1/calendar/dismiss/{email_id}", headers=_auth(token))
+        assert r.status_code == 400
+
+    def test_dismiss_not_found_returns_404(self):
+        token = _create_and_login()
+        r = client.post("/api/v1/calendar/dismiss/999999", headers=_auth(token))
+        assert r.status_code == 404

@@ -1,10 +1,11 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
 from app.core.config import settings
 from app.core.encryption import encrypt
+from app.core.rate_limiter import login_limiter, registration_limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.database import get_db
 from app.models.auth_token import TokenType
@@ -16,13 +17,32 @@ from app.services.email_service import send_verification_email
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+
+def _client_ip(request: Request) -> str:
+    """Use the direct peer address; reverse proxies must be configured explicitly."""
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_rate_limit(*, limiter, key: str) -> None:
+    if limiter.is_allowed(key):
+        return
+    retry_after = limiter.seconds_until_reset(key)
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Too many attempts. Please try again later.",
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=UserResponse)
 async def create_user(
     user_in: UserCreate,
     background_tasks: BackgroundTasks,
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """Create a new user account. A verification email will be sent to the provided address."""
+    _enforce_rate_limit(limiter=registration_limiter, key=_client_ip(request))
     existing_user = db.query(User).filter_by(email=user_in.email).first()
     if existing_user:
         raise HTTPException(
@@ -53,11 +73,17 @@ async def create_user(
     return user
 
 @router.post("/login", response_model=Token)
-def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+def login(login_data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """
     Authenticate user and return JWT access token.
     Token expires after ACCESS_TOKEN_EXPIRE_MINUTES (default: 60 minutes).
     """
+    # Limit each source and account pair to slow credential stuffing.
+    _enforce_rate_limit(
+        limiter=login_limiter,
+        key=f"{_client_ip(request)}:{login_data.email.casefold()}",
+    )
+
     # Find user by email
     user = db.query(User).filter(User.email == login_data.email).first()
 

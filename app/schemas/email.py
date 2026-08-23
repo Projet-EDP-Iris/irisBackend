@@ -16,6 +16,9 @@ class EmailItem(BaseModel):
     db_id: int | None = None  # DB primary key — populated after upsert
     provider: str = "unknown"  # "gmail" | "outlook" | "unknown"
     suggested_reply: str | None = None
+    is_done: bool = False  # category-specific terminal action taken (see Email.is_done)
+    is_read: bool = False  # user has opened this email (see Email.is_read)
+    status: str | None = None  # e.g. "confirmed" | "dismissed" for RDV
 
 
 class EmailFeedResponse(BaseModel):

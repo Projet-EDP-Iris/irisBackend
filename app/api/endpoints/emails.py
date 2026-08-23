@@ -101,15 +101,35 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
 
 def _load_existing_categories(db: Session, user_id: int) -> dict[str, str | None]:
     """Pre-load message_id -> stored category for a user, so callers can skip
-    reclassifying emails that already have a real (non-"info" placeholder)
-    category. Used to avoid re-running NLP/LLM detection on every call."""
+    reclassifying emails that already have a stored category. "info" is a real
+    classifier output (not a placeholder) so it counts as classified too --
+    otherwise every Info email gets re-detected on every call, defeating the
+    once-per-message idempotency guarantee."""
     return {
-        row.message_id: (row.category if row.category and row.category != "info" else None)
+        row.message_id: row.category
         for row in db.query(Email.message_id, Email.category)
             .filter(Email.user_id == user_id)
             .all()
         if row.message_id
     }
+
+
+def _hydrate_persisted_state(db: Session, items: list[EmailItem]) -> None:
+    """After _upsert_email_items has populated item.db_id, copy each row's
+    persisted is_done/is_read/status onto the response item. Without this,
+    /emails and /emails/feed silently reset those badges/actions to their
+    defaults on every refresh -- only /emails/cached applied them."""
+    ids = [it.db_id for it in items if it.db_id]
+    if not ids:
+        return
+    rows = db.query(Email.id, Email.is_done, Email.is_read, Email.status).filter(Email.id.in_(ids)).all()
+    by_id = {row.id: row for row in rows}
+    for it in items:
+        row = by_id.get(it.db_id) if it.db_id else None
+        if row:
+            it.is_done = row.is_done
+            it.is_read = row.is_read
+            it.status = row.status
 
 
 def _get_gmail_emails(user_id: int, max_results: int | None = None) -> list[EmailItem]:
@@ -213,6 +233,7 @@ def get_emails(
             for future in _as_completed(futures):
                 items[futures[future]].category = future.result()
     _upsert_email_items(db, current_user.id, items)
+    _hydrate_persisted_state(db, items)
     return items
 
 
@@ -482,6 +503,7 @@ def get_email_feed(
     has_more = (gmail_next_cursor is not None) or outlook_has_more
 
     _upsert_email_items(db, current_user.id, all_emails)
+    _hydrate_persisted_state(db, all_emails)
 
     return EmailFeedResponse(
         emails=all_emails,
@@ -645,6 +667,11 @@ def mark_email_done(
     )
     if not record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+    if record.category not in ("action", "attente", "bonsplans"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="mark-done only applies to action, attente, or bonsplans categories",
+        )
 
     record.is_done = True
     db.commit()

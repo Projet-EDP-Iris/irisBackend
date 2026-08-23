@@ -2,7 +2,6 @@ import logging
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 
 from app.api.endpoints.calendar import router as calendar_router
 from app.api.endpoints.emails import router as email_router
@@ -55,19 +54,15 @@ ALLOWED_ORIGINS = [
     "http://localhost:8080",
     "https://one-page-site-nine.vercel.app",
     "https://one-page-site-ten.vercel.app",
+    "null",  # Packaged Electron .exe loads from file://, which sends Origin: null
 ]
 
-if settings.ENVIRONMENT.lower() != "production":
-    # Electron loads file:// pages with Origin: null; never permit that origin in production.
-    ALLOWED_ORIGINS.append("null")
+if os.getenv("ENVIRONMENT") != "production":
     ALLOWED_ORIGINS.extend([
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:8080",
     ])
-
-if settings.ENVIRONMENT.lower() == "production":
-    app.add_middleware(HTTPSRedirectMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

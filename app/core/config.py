@@ -49,10 +49,6 @@ class Settings(BaseSettings):
     # "common" allows any Microsoft/Outlook account; set a specific tenant ID for org-only
     MICROSOFT_REDIRECT_URI: str = Field(default="http://localhost:8000/api/v1/auth/microsoft/callback")
 
-    # GitHub — bug report integration
-    GITHUB_TOKEN: str = Field(default="")
-    GITHUB_REPO: str = Field(default="")
-
     # Frontend URL — used in email links
     FRONTEND_URL: str = Field(default="http://localhost:5173")
 

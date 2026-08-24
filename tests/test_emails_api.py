@@ -416,3 +416,48 @@ def test_get_emails_hydrates_persisted_state(mock_gmail, mock_load_token, _mock_
     assert len(data) == 1
     assert data[0]["is_done"] is True
     assert data[0]["is_read"] is True
+
+
+# --- reminders: expose provider outcome to the frontend ---
+
+
+def _set_task_providers(providers: list[str]) -> None:
+    db = TestSessionLocal()
+    try:
+        user = db.query(User).filter_by(email="emails@example.com").first()
+        user.calendar_providers = providers
+        user.calendar_provider = providers[0] if providers else None
+        db.commit()
+    finally:
+        db.close()
+
+
+@patch("app.api.endpoints.emails.create_google_task", return_value="google-task-1")
+def test_remind_returns_success_message(mock_google_task, client_with_db, setup_database, auth_headers):
+    email_id = _seed_email("emails@example.com", "remind_google", "attente")
+    _set_task_providers(["google"])
+
+    response = client_with_db.post(f"/api/v1/emails/{email_id}/remind", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Rappel créé dans vos tâches."
+    assert response.json()["providers"] == [
+        {"provider": "google", "task_id": "google-task-1", "error": None}
+    ]
+    mock_google_task.assert_called_once()
+
+
+@patch("app.api.endpoints.emails.create_outlook_task", side_effect=RuntimeError("provider unavailable"))
+@patch("app.api.endpoints.emails.create_google_task", return_value="google-task-1")
+def test_remind_returns_partial_provider_message(
+    mock_google_task, _mock_outlook_task, client_with_db, setup_database, auth_headers
+):
+    email_id = _seed_email("emails@example.com", "remind_partial", "attente")
+    _set_task_providers(["google", "outlook"])
+
+    response = client_with_db.post(f"/api/v1/emails/{email_id}/remind", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Rappel créé (google) — échec sur outlook."
+    assert response.json()["providers"][1]["error"] == "Impossible de créer le rappel avec ce service"
+    mock_google_task.assert_called_once()

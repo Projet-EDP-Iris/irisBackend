@@ -75,8 +75,10 @@ class Settings(BaseSettings):
         if self.ENVIRONMENT.lower() == "production":
             if self.SECRET_KEY == "test-secret" or len(self.SECRET_KEY) < 32:
                 raise ValueError("SECRET_KEY must be a strong, non-default value in production")
-            if not self.FRONTEND_URL.startswith("https://"):
-                raise ValueError("FRONTEND_URL must use HTTPS in production")
+            is_secure_web_url = self.FRONTEND_URL.startswith("https://")
+            is_packaged_desktop_url = self.FRONTEND_URL.startswith("file://")
+            if not (is_secure_web_url or is_packaged_desktop_url):
+                raise ValueError("FRONTEND_URL must use HTTPS, or file:// for the packaged desktop client, in production")
         return self
 
 

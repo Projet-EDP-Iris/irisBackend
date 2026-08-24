@@ -296,3 +296,123 @@ def test_counts_empty_mailbox_returns_zero_total(client_with_db, setup_database,
     r = client_with_db.get("/api/v1/emails/counts", headers=auth_headers)
     assert r.status_code == 200
     assert r.json() == {"counts": {}, "total": 0}
+
+
+# --- mark-done: category-gated terminal state ---
+
+
+def _seed_email(user_email: str, message_id: str, category: str | None, is_done: bool = False) -> int:
+    """Insert a single email with a known category directly into the test DB, return its id."""
+    db = TestSessionLocal()
+    try:
+        user = db.query(User).filter_by(email=user_email).first()
+        email = Email(
+            subject="Test", body="Body", message_id=message_id,
+            user_id=user.id, status="fetched", category=category, is_done=is_done,
+        )
+        db.add(email)
+        db.commit()
+        db.refresh(email)
+        return email.id
+    finally:
+        db.close()
+
+
+def test_mark_done_unauthorized(client_with_db, setup_database):
+    r = client_with_db.post("/api/v1/emails/1/mark-done")
+    assert r.status_code == 403
+
+
+@pytest.mark.parametrize("category", ["action", "attente", "bonsplans"])
+def test_mark_done_succeeds_for_allowed_categories(client_with_db, setup_database, auth_headers, category):
+    email_id = _seed_email("emails@example.com", f"md_{category}", category)
+    r = client_with_db.post(f"/api/v1/emails/{email_id}/mark-done", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json() == {"status": "done", "email_id": email_id}
+
+
+@pytest.mark.parametrize("category", ["rdv", "info", None])
+def test_mark_done_rejects_disallowed_categories(client_with_db, setup_database, auth_headers, category):
+    email_id = _seed_email("emails@example.com", f"md_bad_{category}", category)
+    r = client_with_db.post(f"/api/v1/emails/{email_id}/mark-done", headers=auth_headers)
+    assert r.status_code == 400
+    assert "action, attente, or bonsplans" in r.json()["detail"]
+
+
+def test_mark_done_not_found_returns_404(client_with_db, setup_database, auth_headers):
+    r = client_with_db.post("/api/v1/emails/999999/mark-done", headers=auth_headers)
+    assert r.status_code == 404
+
+
+# --- get_email_body: only Info emails get auto-marked done on open ---
+
+
+@patch("app.api.endpoints.emails.GmailService")
+def test_get_email_body_marks_info_email_done(mock_gmail, client_with_db, setup_database, auth_headers):
+    _seed_email("emails@example.com", "body_info_1", "info")
+    mock_svc = MagicMock()
+    mock_gmail.return_value = mock_svc
+    mock_svc.authenticate_for_user.return_value = True
+    mock_svc.fetch_email_body.return_value = "Full body text"
+
+    r = client_with_db.get("/api/v1/emails/body/body_info_1?provider=gmail", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json() == {"body": "Full body text"}
+
+    db = TestSessionLocal()
+    try:
+        record = db.query(Email).filter_by(message_id="body_info_1").first()
+        assert record.is_done is True
+    finally:
+        db.close()
+
+
+@patch("app.api.endpoints.emails.GmailService")
+def test_get_email_body_does_not_mark_other_categories_done(mock_gmail, client_with_db, setup_database, auth_headers):
+    _seed_email("emails@example.com", "body_action_1", "action")
+    mock_svc = MagicMock()
+    mock_gmail.return_value = mock_svc
+    mock_svc.authenticate_for_user.return_value = True
+    mock_svc.fetch_email_body.return_value = "Full body text"
+
+    r = client_with_db.get("/api/v1/emails/body/body_action_1?provider=gmail", headers=auth_headers)
+    assert r.status_code == 200
+
+    db = TestSessionLocal()
+    try:
+        record = db.query(Email).filter_by(message_id="body_action_1").first()
+        assert record.is_done is False
+    finally:
+        db.close()
+
+
+# --- /emails hydrates persisted is_done/is_read/status (not just /emails/cached) ---
+
+
+@patch("app.api.endpoints.emails.is_outlook_connected", return_value=False)
+@patch("app.services.gmail_service._load_gmail_token_from_db")
+@patch("app.api.endpoints.emails.GmailService")
+def test_get_emails_hydrates_persisted_state(mock_gmail, mock_load_token, _mock_outlook, client_with_db, setup_database, auth_headers):
+    _seed_email("emails@example.com", "hydrate_1", "action", is_done=True)
+    db = TestSessionLocal()
+    try:
+        record = db.query(Email).filter_by(message_id="hydrate_1").first()
+        record.is_read = True
+        db.commit()
+    finally:
+        db.close()
+
+    mock_load_token.return_value = ("fake_token", "user@gmail.com")
+    mock_svc = MagicMock()
+    mock_gmail.return_value = mock_svc
+    mock_svc.authenticate_for_user.return_value = True
+    mock_svc.fetch_recent_emails.return_value = [
+        {"subject": "Test", "body": "Body", "message_id": "hydrate_1", "sender": "a@b.com", "date": "1"},
+    ]
+
+    r = client_with_db.get("/api/v1/emails", headers=auth_headers)
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data) == 1
+    assert data[0]["is_done"] is True
+    assert data[0]["is_read"] is True

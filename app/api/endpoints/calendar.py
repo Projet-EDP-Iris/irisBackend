@@ -261,6 +261,7 @@ def confirm_and_add_to_calendar(
     if event_ids and not email_record.calendar_event_id:
         email_record.calendar_event_id = next(iter(event_ids.values()))
     email_record.status = "confirmed"
+    email_record.is_done = True
     db.commit()
 
     return ConfirmCalendarResponse(
@@ -270,3 +271,41 @@ def confirm_and_add_to_calendar(
         calendar_event_ids=event_ids,
         prepared_reply=prepared_reply,
     )
+
+
+class DismissCalendarResponse(BaseModel):
+    status: str
+    email_id: int
+
+
+@router.post(
+    "/calendar/dismiss/{email_id}",
+    response_model=DismissCalendarResponse,
+    summary="One-click: dismiss a proposed RDV slot without confirming it",
+)
+def dismiss_calendar_slot(
+    email_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+) -> DismissCalendarResponse:
+    """Marks an RDV email as dismissed — the user isn't interested in the
+    proposed slot. Terminal state, same as confirming, but without creating
+    any calendar event."""
+    email_record = (
+        db.query(Email)
+        .filter(Email.id == email_id, Email.user_id == current_user.id)
+        .first()
+    )
+    if not email_record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+    if email_record.category != "rdv":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only RDV emails can be dismissed",
+        )
+
+    email_record.status = "dismissed"
+    email_record.is_done = True
+    db.commit()
+
+    return DismissCalendarResponse(status="dismissed", email_id=email_id)

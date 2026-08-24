@@ -25,12 +25,14 @@ from app.schemas.email import (
 from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
 from app.services.detection import categorize_email, detect_batch, enrich_batch
 from app.services.gmail_service import GmailService
+from app.services.google_tasks_service import create_google_task
 from app.services.outlook_email_service import (
     fetch_outlook_delta,
     fetch_outlook_email_page,
     fetch_outlook_emails,
     is_outlook_connected,
 )
+from app.services.outlook_tasks_service import create_outlook_task
 from app.services.prediction_service import get_suggested_slots
 
 router = APIRouter(tags=["emails"])
@@ -710,6 +712,91 @@ def mark_email_read(
     db.commit()
 
     return {"status": "read", "email_id": email_id, "is_done": record.is_done}
+
+
+class _ReminderProviderResult(BaseModel):
+    provider: str
+    task_id: str | None = None
+    error: str | None = None
+
+
+class _ReminderResponse(BaseModel):
+    status: str
+    email_id: int
+    providers: list[_ReminderProviderResult]
+
+
+@router.post(
+    "/emails/{email_id}/remind",
+    response_model=_ReminderResponse,
+    summary="Create a reminder task from an email",
+)
+def remind_email(
+    email_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> _ReminderResponse:
+    """Create a task reminder in every task service connected by the user.
+
+    A reminder is a task rather than a calendar event because an email in
+    the "En attente" category does not necessarily contain a reliable date.
+    """
+    record = (
+        db.query(Email)
+        .filter(Email.id == email_id, Email.user_id == current_user.id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+    if record.category != "attente":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reminders only apply to emails in the attente category",
+        )
+
+    providers = list(current_user.calendar_providers or [])
+    if not providers and current_user.calendar_provider:
+        providers = [current_user.calendar_provider]
+    if not providers and current_user.gmail_oauth_token:
+        providers = ["google"]
+    if not providers and current_user.outlook_oauth_token:
+        providers = ["outlook"]
+    providers = [p for p in dict.fromkeys(providers) if p in {"google", "outlook"}]
+    if not providers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aucun service de tâches connecté. Connectez Google ou Outlook avant de créer un rappel.",
+        )
+
+    title = record.subject or "Rappel depuis un email"
+    notes = record.body or ""
+    results: list[_ReminderProviderResult] = []
+    for provider in providers:
+        result = _ReminderProviderResult(provider=provider)
+        try:
+            if provider == "google":
+                result.task_id = create_google_task(current_user.id, title=title, notes=notes)
+            else:
+                result.task_id = create_outlook_task(current_user.id, title=title, notes=notes)
+        except Exception as exc:
+            result.error = "Impossible de créer le rappel avec ce service"
+            logger.warning(
+                "Reminder creation failed for provider=%s user=%s: %s",
+                provider,
+                current_user.id,
+                exc,
+            )
+        results.append(result)
+
+    if not any(result.task_id for result in results):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Le rappel n’a pas pu être créé auprès des services connectés. Vérifiez leur connexion puis réessayez.",
+        )
+
+    record.is_done = True
+    db.commit()
+    return _ReminderResponse(status="reminded", email_id=email_id, providers=results)
 
 
 class _SummarizeRequest(BaseModel):

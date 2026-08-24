@@ -1,8 +1,8 @@
 import logging
 
 from fastapi import FastAPI
-from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import RedirectResponse
 
 from app.api.endpoints.calendar import router as calendar_router

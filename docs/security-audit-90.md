@@ -1,18 +1,18 @@
-# Audit de securite - issue #90
+# Audit de sécurité — issue #90
 
-Date : 23 aout 2026. Perimetre : irisBackend et irisFrontendApp.
+Date : 23 août 2026. Périmètre : irisBackend et irisFrontendApp.
 
-## Synthese
+## Synthèse
 
-| Severite | Constat | Statut |
+| Sévérité | Constat | Statut |
 | --- | --- | --- |
-| Critique | Une cle JWT de test peut demarrer le service en production. | Corrige dans la PR de durcissement associee. |
-| Elevee | La connexion et l inscription ne sont pas limitees ; seul le reset de mot de passe l etait. | Corrige dans la PR de durcissement associee. |
-| Elevee | L origine CORS null est acceptee y compris en production. | Corrige dans la PR de durcissement associee. |
-| Moyenne | HTTPS n est pas redirige explicitement par l application en production. | Corrige dans la PR de durcissement associee. |
-| Critique | Un fichier .env apparait dans l historique Git et GitHub Secret Scanning est desactive. | Assainissement et rotation des secrets requis. |
-| Moyenne | Aucun CAPTCHA n est en place pour inscription/connexion. | A planifier apres choix Turnstile ou hCaptcha. |
-| Faible | Aucun mecanisme de rotation/revocation de JWT d acces n est present. | A traiter avec un cycle refresh-token si la duree de session augmente. |
+| Critique | Une clé JWT de test peut démarrer le service en production. | Corrigé dans la PR de durcissement associée (#111). |
+| Elevee | La connexion et l’inscription ne sont pas limitées ; seul le reset de mot de passe l’était. | Corrige dans la PR de durcissement associee. |
+| Elevee | L’origine CORS null est acceptée y compris en production. | Corrige dans la PR de durcissement associee. |
+| Moyenne | HTTPS n’est pas redirigé explicitement par l’application en production. | Corrige dans la PR de durcissement associee. |
+| Critique | Un fichier .env apparaît dans l’historique Git et GitHub Secret Scanning est désactivé. | Assainissement et rotation des secrets requis. |
+| Moyenne | Aucun CAPTCHA n’est en place pour l’inscription/la connexion. | À planifier après choix de Turnstile ou hCaptcha. |
+| Faible | Aucun mécanisme de rotation/révocation de JWT d’accès n’est présent. | À traiter avec un cycle refresh-token si la durée de session augmente. |
 
 ## Verifications realisees
 
@@ -21,11 +21,11 @@ Date : 23 aout 2026. Perimetre : irisBackend et irisFrontendApp.
 - Les erreurs email inconnu et mot de passe incorrect ont le meme message.
 - Les JWT sont signes en HS256 et expirent ; les jetons invalides sont rejetes.
 - Une limitation en memoire existe pour la recuperation de mot de passe, mais elle ne protegeait ni inscription ni login.
-- L API GitHub indique que Secret Scanning est desactive. La revue des noms de fichiers de l historique revele un fichier .env ; son contenu n a pas ete affiche. Il doit etre considere comme potentiellement expose jusqu a la rotation de tous les secrets.
+- L’API GitHub indique que Secret Scanning est désactivé. La revue des noms de fichiers de l’historique révèle un fichier .env ; son contenu n’a pas été affiché. Il doit être considéré comme potentiellement exposé jusqu’à la rotation de tous les secrets.
 
 ## Correctifs appliques separement
 
-La PR de durcissement associee ajoute :
+La PR de durcissement associée (#111) ajoute :
 
 1. un garde-fou qui interdit la cle JWT par defaut ou trop courte en production ;
 2. une redirection HTTPS en production ;
@@ -37,8 +37,8 @@ La PR de durcissement associee ajoute :
 
 ## Actions de production requises
 
-- Revoquer et remplacer immediatement chaque secret qui a pu figurer dans le .env historique, puis purger l historique avec git-filter-repo et coordonner le force-push. Activer ensuite GitHub Secret Scanning et lancer Gitleaks sans afficher ni recopier de secrets.
-- Definir une SECRET_KEY aleatoire d au moins 32 caracteres, ainsi que les secrets OAuth, uniquement dans le gestionnaire de secrets du deploiement.
-- Mettre ENVIRONMENT=production et utiliser des URL https pour le frontend et les redirections OAuth.
-- Placer l API derriere un proxy TLS de confiance et configurer les en-tetes proxy avant de deployer la redirection HTTPS.
-- Choisir Turnstile ou hCaptcha ; la verification doit etre realisee cote backend avant inscription et connexion.
+- Révoquer et remplacer immédiatement chaque secret qui a pu figurer dans le .env historique, puis purger l’historique avec git-filter-repo et coordonner le force-push. Activer ensuite GitHub Secret Scanning et lancer Gitleaks sans afficher ni recopier de secrets.
+- Définir une SECRET_KEY aleatoire d’au moins 32 caractères, ainsi que les secrets OAuth, uniquement dans le gestionnaire de secrets du deploiement.
+- Mettre ENVIRONMENT=production et utiliser des URL HTTPS pour le frontend et les redirections OAuth.
+- Placer l API derrière un proxy TLS de confiance et configurer les en-tetes proxy avant de deployer la redirection HTTPS.
+- Choisir Turnstile ou hCaptcha ; la vérification doit être réalisée côté backend avant inscription et connexion.

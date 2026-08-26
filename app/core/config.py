@@ -31,10 +31,6 @@ class Settings(BaseSettings):
     TEXTCAT_MODEL_PATH: str = Field(default="app/ML/models/iris_textcat")
     TEXTCAT_CONFIDENCE_THRESHOLD: float = Field(default=0.65)
 
-    # Resend (transactional email)
-    RESEND_API_KEY: str | None = Field(default=None)
-    RESEND_FROM_EMAIL: str = Field(default="noreply@iris-app.com")
-
     # Gmail OAuth (optional; for OAuth callback flow)
     GOOGLE_CLIENT_ID: str | None = Field(default=None)
     GOOGLE_CLIENT_SECRET: str | None = Field(default=None)
@@ -56,6 +52,11 @@ class Settings(BaseSettings):
 
     # Frontend URL — used in email links
     FRONTEND_URL: str = Field(default="http://localhost:5173")
+
+    # Cloudflare Turnstile CAPTCHA (protège POST /users/ contre les inscriptions automatisées)
+    # Clés de test : Site Key = 1x00000000000000000000AA / Secret = 1x0000000000000000000000000000000AA
+    TURNSTILE_ENABLED: bool = Field(default=False)
+    TURNSTILE_SECRET_KEY: str | None = Field(default=None)
 
     # Email (SMTP) — set EMAIL_ENABLED=true and configure SMTP to send real emails
     EMAIL_ENABLED: bool = Field(default=False)

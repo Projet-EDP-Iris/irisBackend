@@ -397,7 +397,8 @@ class TestConfirmCalendar:
         assert r.status_code != 400, f"Got 400: {r.json()}"
         assert "predicted" not in r.json().get("detail", "").lower()
 
-    def test_confirm_no_provider_configured_returns_400(self):
+    @patch("app.services.gmail_service._load_gmail_token_from_db", return_value=None)
+    def test_confirm_no_provider_configured_returns_400(self, _mock_gmail_load):
         """If the user has no calendar_provider set, return 400 with a helpful message."""
         token = _create_and_login()
         # Do NOT call calendar-setup — user has no provider

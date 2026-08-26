@@ -389,14 +389,15 @@ class TestChangePassword:
 # ---------------------------------------------------------------------------
 
 class TestLoginVerificationGuard:
-    def test_unverified_user_cannot_login(self):
+    def test_unverified_user_can_login(self):
+        """Unverified users can now login — email verification is no longer required to access the app."""
         _register_user()
         resp = client.post(
             f"{USERS_BASE}/login",
             json={"email": TEST_EMAIL, "password": TEST_PASSWORD},
         )
-        assert resp.status_code == 403
-        assert "verified" in resp.json()["detail"].lower()
+        assert resp.status_code == 200
+        assert "access_token" in resp.json()
 
     def test_verified_user_can_login(self):
         _register_and_verify()

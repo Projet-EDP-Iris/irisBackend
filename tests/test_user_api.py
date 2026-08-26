@@ -139,6 +139,7 @@ def test_login_success():
     assert "access_token" in data
     assert data["token_type"] == "bearer"
     assert len(data["access_token"]) > 0
+    assert data["refresh_token"] is None
 
 def test_login_unverified_user():
     """Unverified users can now login — email verification is no longer required to access the app."""
@@ -571,3 +572,65 @@ class TestCaptcha:
             "captcha_token": "invalid-token",
         })
         assert r.status_code == 400
+
+
+class TestRememberMe:
+    """Refresh token issued at login with remember_me=true (issue #97)."""
+
+    def test_login_without_remember_me_has_no_refresh_token(self):
+        _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
+        r = client.post(f"{BASE}/login", json={
+            "email": TEST_USER_EMAIL,
+            "password": TEST_USER_PASSWORD,
+        })
+        assert r.status_code == 200
+        assert r.json()["refresh_token"] is None
+
+    def test_login_with_remember_me_returns_refresh_token(self):
+        _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
+        r = client.post(f"{BASE}/login", json={
+            "email": TEST_USER_EMAIL,
+            "password": TEST_USER_PASSWORD,
+            "remember_me": True,
+        })
+        assert r.status_code == 200
+        data = r.json()
+        assert data["refresh_token"]
+        assert len(data["refresh_token"]) > 0
+
+    def test_refresh_endpoint_issues_new_access_token(self):
+        _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
+        login_resp = client.post(f"{BASE}/login", json={
+            "email": TEST_USER_EMAIL,
+            "password": TEST_USER_PASSWORD,
+            "remember_me": True,
+        })
+        refresh_token = login_resp.json()["refresh_token"]
+
+        r = client.post(f"{BASE}/refresh", json={"refresh_token": refresh_token})
+        assert r.status_code == 200
+        data = r.json()
+        assert data["access_token"]
+        assert data["refresh_token"]
+        # Rotated — the new refresh token differs from the one used to get here.
+        assert data["refresh_token"] != refresh_token
+
+    def test_refresh_token_is_rotated_and_single_use(self):
+        """Reusing an already-consumed refresh token must fail (rotation)."""
+        _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
+        login_resp = client.post(f"{BASE}/login", json={
+            "email": TEST_USER_EMAIL,
+            "password": TEST_USER_PASSWORD,
+            "remember_me": True,
+        })
+        refresh_token = login_resp.json()["refresh_token"]
+
+        first = client.post(f"{BASE}/refresh", json={"refresh_token": refresh_token})
+        assert first.status_code == 200
+
+        second = client.post(f"{BASE}/refresh", json={"refresh_token": refresh_token})
+        assert second.status_code == 401
+
+    def test_refresh_with_invalid_token_returns_401(self):
+        r = client.post(f"{BASE}/refresh", json={"refresh_token": "not-a-real-token"})
+        assert r.status_code == 401

@@ -12,9 +12,17 @@ from app.db.database import get_db
 from app.models.auth_token import TokenType
 from app.models.user import User
 from app.schemas.auth import ChangePasswordRequest, MessageResponse
-from app.schemas.user import LoginRequest, Token, UserCreate, UserResponse, UserUpdate
+from app.schemas.user import (
+    LoginRequest,
+    RefreshRequest,
+    Token,
+    UserCreate,
+    UserResponse,
+    UserUpdate,
+)
 from app.services.auth_token_service import create_token
 from app.services.email_service import send_verification_email
+from app.services.refresh_token_service import consume_refresh_token, create_refresh_token
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -123,7 +131,46 @@ async def login(login_data: LoginRequest, request: Request, db: Session = Depend
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
 
-    return Token(access_token=access_token, token_type="bearer")
+    refresh_token = None
+    if login_data.remember_me:
+        refresh_token = create_refresh_token(db, user.id)
+        db.commit()
+
+    return Token(access_token=access_token, token_type="bearer", refresh_token=refresh_token)
+
+
+@router.post("/refresh", response_model=Token)
+def refresh_access_token(body: RefreshRequest, db: Session = Depends(get_db)):
+    """
+    Exchange a valid refresh token (issued at login with remember_me=true) for a
+    new access token, without re-entering credentials. Rotates the refresh token
+    on every use: the old one is revoked and a new one is returned alongside the
+    new access token, so a stolen-but-unused refresh token stops working the
+    next time the legitimate client uses it.
+    """
+    record = consume_refresh_token(db, body.refresh_token)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    user = db.query(User).filter(User.id == record.user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    record.revoked = True
+    new_refresh_token = create_refresh_token(db, user.id)
+    db.commit()
+
+    access_token = create_access_token(
+        subject=str(user.id),
+        data={"email": user.email, "role": user.role},
+        secret=settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+        minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+    return Token(access_token=access_token, token_type="bearer", refresh_token=new_refresh_token)
 
 @router.get(
     "/",

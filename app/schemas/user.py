@@ -76,11 +76,17 @@ class LoginRequest(BaseModel):
     email: EmailStr
     password: str
     captcha_token: str | None = None  # Cloudflare Turnstile — validé côté backend
+    remember_me: bool = False  # if true, also issue a long-lived refresh token
 
 
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    refresh_token: str | None = None  # present only when remember_me was set at login
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 class TokenPayload(BaseModel):

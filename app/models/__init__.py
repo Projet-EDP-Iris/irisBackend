@@ -4,6 +4,7 @@ from app.models.base import Base
 from app.models.email import Email
 from app.models.feedback import DetectionFeedback
 from app.models.processing_state import ProcessingState
+from app.models.refresh_token import RefreshToken
 from app.models.sync_state import SyncState
 from app.models.user import User
 
@@ -13,6 +14,7 @@ __all__ = [
     "Email",
     "DetectionFeedback",
     "ProcessingState",
+    "RefreshToken",
     "SyncState",
     "User",
 ]

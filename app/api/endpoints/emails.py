@@ -730,6 +730,7 @@ class _ReminderResponse(BaseModel):
     status: str
     email_id: int
     providers: list[_ReminderProviderResult]
+    message: str
 
 
 @router.post(
@@ -800,9 +801,18 @@ def remind_email(
             detail="Le rappel n’a pas pu être créé auprès des services connectés. Vérifiez leur connexion puis réessayez.",
         )
 
+    succeeded = [result.provider for result in results if result.task_id]
+    failed = [result.provider for result in results if result.error]
+    if failed:
+        message = f"Rappel créé ({', '.join(succeeded)}) — échec sur {', '.join(failed)}."
+    else:
+        message = "Rappel créé dans vos tâches."
+
     record.is_done = True
     db.commit()
-    return _ReminderResponse(status="reminded", email_id=email_id, providers=results)
+    return _ReminderResponse(
+        status="reminded", email_id=email_id, providers=results, message=message
+    )
 
 
 class _SummarizeRequest(BaseModel):

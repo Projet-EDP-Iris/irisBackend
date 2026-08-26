@@ -22,12 +22,23 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run TruffleHog secret scan
+      # On pull_request, scan just the diff against the target branch. On push/schedule
+      # there's no meaningful base/head range (they'd resolve to the same commit and
+      # TruffleHog errors out with "BASE and HEAD commits are the same"), so scan the
+      # whole tree instead by omitting base/head.
+      - name: Run TruffleHog secret scan (PR diff)
+        if: github.event_name == 'pull_request'
         uses: trufflesecurity/trufflehog@main
         with:
           path: ./
-          base: ${{ github.event.repository.default_branch }}
-          head: HEAD
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+
+      - name: Run TruffleHog secret scan (full tree)
+        if: github.event_name != 'pull_request'
+        uses: trufflesecurity/trufflehog@main
+        with:
+          path: ./
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v4

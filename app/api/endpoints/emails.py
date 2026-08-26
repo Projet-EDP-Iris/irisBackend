@@ -25,15 +25,29 @@ from app.schemas.email import (
 from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
 from app.services.detection import categorize_email, detect_batch, enrich_batch
 from app.services.gmail_service import GmailService
+from app.services.google_tasks_service import create_google_task
 from app.services.outlook_email_service import (
+    fetch_outlook_delta,
     fetch_outlook_email_page,
     fetch_outlook_emails,
     is_outlook_connected,
 )
+from app.services.outlook_tasks_service import create_outlook_task
 from app.services.prediction_service import get_suggested_slots
 
 router = APIRouter(tags=["emails"])
 logger = logging.getLogger(__name__)
+
+# Reverse of app.nlp.extractor.classification_to_category — used to build a cheap
+# placeholder ExtractionResult for emails that already have a stored category, so
+# fetch-and-detect / fetch-detect-predict can skip re-running NLP detection on them.
+_CATEGORY_TO_CLASSIFICATION: dict[str, str] = {
+    "rdv": "meeting_schedule",
+    "action": "action",
+    "attente": "attente",
+    "bonsplans": "bonsplans",
+    "info": "info",
+}
 
 
 def _sort_key(date_str: str | None) -> datetime:
@@ -87,6 +101,39 @@ def _upsert_email_items(db: Session, user_id: int, items: list[EmailItem]) -> No
     db.commit()
 
 
+def _load_existing_categories(db: Session, user_id: int) -> dict[str, str | None]:
+    """Pre-load message_id -> stored category for a user, so callers can skip
+    reclassifying emails that already have a stored category. "info" is a real
+    classifier output (not a placeholder) so it counts as classified too --
+    otherwise every Info email gets re-detected on every call, defeating the
+    once-per-message idempotency guarantee."""
+    return {
+        row.message_id: row.category
+        for row in db.query(Email.message_id, Email.category)
+            .filter(Email.user_id == user_id)
+            .all()
+        if row.message_id
+    }
+
+
+def _hydrate_persisted_state(db: Session, items: list[EmailItem]) -> None:
+    """After _upsert_email_items has populated item.db_id, copy each row's
+    persisted is_done/is_read/status onto the response item. Without this,
+    /emails and /emails/feed silently reset those badges/actions to their
+    defaults on every refresh -- only /emails/cached applied them."""
+    ids = [it.db_id for it in items if it.db_id]
+    if not ids:
+        return
+    rows = db.query(Email.id, Email.is_done, Email.is_read, Email.status).filter(Email.id.in_(ids)).all()
+    by_id = {row.id: row for row in rows}
+    for it in items:
+        row = by_id.get(it.db_id) if it.db_id else None
+        if row:
+            it.is_done = row.is_done
+            it.is_read = row.is_read
+            it.status = row.status
+
+
 def _get_gmail_emails(user_id: int, max_results: int | None = None) -> list[EmailItem]:
     """Fetch emails from Gmail. Returns empty list if not connected or on error."""
     svc = GmailService()
@@ -121,7 +168,7 @@ def _get_outlook_emails(user_id: int, max_results: int | None = None) -> list[Em
 def _get_all_emails_for_user(user_id: int, max_results: int | None = None) -> list[EmailItem]:
     """
     Merge Gmail and Outlook emails for a user.
-    - Returns 404 if neither Gmail nor Outlook is connected.
+    - Returns an empty list if neither Gmail nor Outlook is connected.
     - Silently skips a source that fails but returns results from the other.
     - Returns emails sorted by date (most recent first). max_results=None fetches all.
     """
@@ -130,10 +177,9 @@ def _get_all_emails_for_user(user_id: int, max_results: int | None = None) -> li
     outlook_connected = is_outlook_connected(user_id)
 
     if not gmail_connected and not outlook_connected:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No email provider connected. Please connect Gmail or Outlook.",
-        )
+        # No mailbox connected yet — return empty list so the frontend can show
+        # an onboarding/connect-your-mailbox state instead of an error screen.
+        return []
 
     emails: list[EmailItem] = []
 
@@ -166,21 +212,29 @@ def get_emails(
     Fetch recent emails for the authenticated user.
 
     Aggregates from all connected providers (Gmail and/or Outlook).
-    Returns HTTP 404 if neither Gmail nor Outlook is connected.
+    Returns an empty list if neither Gmail nor Outlook is connected.
+    Emails that already have a stored category are not reclassified — only
+    uncategorized/new ones run through NLP detection (mirrors /emails/feed).
     """
     items = _get_all_emails_for_user(current_user.id, max_results=max_results)
-    if items:
-        with ThreadPoolExecutor(max_workers=min(8, len(items))) as executor:
+    existing_categories = _load_existing_categories(db, current_user.id)
+    for it in items:
+        it.category = existing_categories.get(it.message_id)
+
+    uncategorized = [(i, it) for i, it in enumerate(items) if not it.category]
+    if uncategorized:
+        with ThreadPoolExecutor(max_workers=min(8, len(uncategorized))) as executor:
             futures = {
                 executor.submit(
                     categorize_email,
                     DetectionEmailInput(subject=it.subject, body=it.body, sender=it.sender or ""),
                 ): i
-                for i, it in enumerate(items)
+                for i, it in uncategorized
             }
             for future in _as_completed(futures):
                 items[futures[future]].category = future.result()
     _upsert_email_items(db, current_user.id, items)
+    _hydrate_persisted_state(db, items)
     return items
 
 
@@ -188,21 +242,41 @@ def get_emails(
 def post_fetch_and_detect(
     max_results: int | None = None,
     current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
 ) -> FetchAndDetectResponse:
     """
     Fetch recent emails (Gmail + Outlook) and run NLP detection on each.
-    Returns HTTP 404 if no email provider is connected.
+    Returns an empty result if no email provider is connected.
+    Emails that already have a stored category skip NLP detection — a cheap
+    placeholder ExtractionResult derived from the stored category is returned
+    instead (mirrors /emails/feed's existing-category skip).
     """
     email_items = _get_all_emails_for_user(current_user.id, max_results=max_results)
+    existing_categories = _load_existing_categories(db, current_user.id)
+
+    to_detect = [e for e in email_items if not existing_categories.get(e.message_id)]
     email_inputs = [
         DetectionEmailInput(
             subject=e.subject,
             body=e.body,
             message_id=e.message_id or "",
         )
-        for e in email_items
+        for e in to_detect
     ]
-    extractions = detect_batch(email_inputs)
+    detected = iter(detect_batch(email_inputs))
+
+    extractions: list[ExtractionResult] = []
+    for item in email_items:
+        cached_category = existing_categories.get(item.message_id)
+        if cached_category:
+            item.category = cached_category
+            extractions.append(ExtractionResult(
+                classification=_CATEGORY_TO_CLASSIFICATION.get(cached_category, "other"),
+                confidence=1.0,
+            ))
+        else:
+            extractions.append(next(detected))
+
     return FetchAndDetectResponse(emails=email_items, extractions=extractions)
 
 
@@ -221,7 +295,10 @@ async def post_fetch_detect_predict(
 ) -> FetchDetectPredictResponse:
     """
     Fetch emails (Gmail + Outlook), run detection + async enrichment, then prediction.
-    Returns HTTP 404 if no email provider is connected.
+    Returns an empty result if no email provider is connected.
+    Emails that already have a stored category skip NLP detection (mirrors
+    /emails/feed's existing-category skip) — only new/uncategorized emails
+    run through the detect_batch pipeline.
     """
     import asyncio
 
@@ -230,6 +307,16 @@ async def post_fetch_detect_predict(
     email_items = await asyncio.to_thread(
         _get_all_emails_for_user, current_user.id, max_results
     )
+    if not email_items:
+        # No mailbox connected (or empty inbox) — don't fabricate a suggestion
+        # from a blank ExtractionResult, just return an empty structure.
+        return FetchDetectPredictResponse(
+            emails=[], extractions=[], suggested_slots=[],
+            status=PredictionStatus.READY_TO_SCHEDULE,
+        )
+    existing_categories = _load_existing_categories(db, current_user.id)
+
+    to_detect = [e for e in email_items if not existing_categories.get(e.message_id)]
     email_inputs = [
         DetectionEmailInput(
             subject=e.subject,
@@ -237,11 +324,20 @@ async def post_fetch_detect_predict(
             message_id=e.message_id or "",
             sender=e.sender or "",
         )
-        for e in email_items
+        for e in to_detect
     ]
 
-    # Sync phase: regex + spaCy + sync LLM meeting-metadata enhance
-    extractions = await asyncio.to_thread(detect_batch, email_inputs)
+    # Sync phase: regex + spaCy + sync LLM meeting-metadata enhance (new emails only)
+    detected = iter(await asyncio.to_thread(detect_batch, email_inputs))
+    extractions = [
+        ExtractionResult(
+            classification=_CATEGORY_TO_CLASSIFICATION.get(existing_categories[e.message_id], "other"),
+            confidence=1.0,
+        )
+        if existing_categories.get(e.message_id)
+        else next(detected)
+        for e in email_items
+    ]
 
     # Async enrichment: LLM category for ambiguous emails + auto-reply drafts
     await enrich_batch(email_items, extractions)
@@ -329,6 +425,9 @@ def get_cached_emails(
             category=row.category or "info",
             date=row.email_date,
             provider=row.provider or "unknown",
+            is_done=row.is_done,
+            is_read=row.is_read,
+            status=row.status,
         )
         for row in rows
     ]
@@ -348,13 +447,7 @@ def get_email_feed(
     Fetches one page from Gmail (batch, metadata + snippet) and one page from Outlook.
     """
     # Pre-fetch known message IDs + stored categories to skip NLP for already-categorised emails.
-    existing_categories: dict[str, str | None] = {
-        row.message_id: (row.category if row.category and row.category != "info" else None)
-        for row in db.query(Email.message_id, Email.category)
-            .filter(Email.user_id == current_user.id)
-            .all()
-        if row.message_id
-    }
+    existing_categories = _load_existing_categories(db, current_user.id)
     gmail_emails: list[EmailItem] = []
     gmail_next_cursor: str | None = None
 
@@ -389,6 +482,8 @@ def get_email_feed(
             outlook_page, outlook_has_more = fetch_outlook_email_page(
                 current_user.id, skip=outlook_skip, limit=limit
             )
+            for it in outlook_page:
+                it.category = existing_categories.get(it.message_id)
             outlook_emails = outlook_page
             if outlook_has_more:
                 outlook_next_skip = outlook_skip + len(outlook_emails)
@@ -416,6 +511,7 @@ def get_email_feed(
     has_more = (gmail_next_cursor is not None) or outlook_has_more
 
     _upsert_email_items(db, current_user.id, all_emails)
+    _hydrate_persisted_state(db, all_emails)
 
     return EmailFeedResponse(
         emails=all_emails,
@@ -426,42 +522,105 @@ def get_email_feed(
 
 
 def sync_user_emails_background(user_id: int) -> None:
-    """Fetch the first page of emails from all connected providers and persist them.
+    """Fetch new/changed emails from all connected providers and persist them.
     Called as a FastAPI BackgroundTask after OAuth so the DB is populated before
-    the frontend's next /emails/cached or /emails/feed poll."""
+    the frontend's next /emails/cached or /emails/feed poll.
+
+    This is the sync entry point wired to every login. Two things keep it cheap
+    on repeat logins:
+    - A persisted SyncState cursor (Gmail historyId / Outlook @odata.deltaLink)
+      means repeat calls fetch only new/changed mail instead of re-listing the
+      whole mailbox.
+    - Emails that already have a stored category are never reclassified — only
+      genuinely new message_ids run through categorize_email.
+    """
     from app.db.database import SessionLocal  # local import — runs in background thread
+    from app.models.sync_state import SyncState
     db = SessionLocal()
     try:
+        existing_categories = _load_existing_categories(db, user_id)
         items: list[EmailItem] = []
+
+        # --- Gmail ---
         svc = GmailService()
         if svc.authenticate_for_user(user_id):
             try:
-                raw_list, _ = svc.fetch_email_page(page_token=None, limit=50)
-                items.extend([
-                    EmailItem(
+                gmail_sync = (
+                    db.query(SyncState)
+                    .filter(SyncState.user_id == user_id, SyncState.provider == "gmail")
+                    .first()
+                )
+                raw_list: list[dict] = []
+                next_cursor: str | None = None
+                if gmail_sync and gmail_sync.cursor:
+                    try:
+                        raw_list, next_cursor = svc.fetch_history_since(gmail_sync.cursor, limit=50)
+                    except Exception:
+                        logger.warning(
+                            "Gmail history sync stale/failed for user_id=%d, falling back to full fetch",
+                            user_id,
+                        )
+                        gmail_sync = None  # force full-fetch fallback below
+
+                if not gmail_sync or not gmail_sync.cursor:
+                    raw_list, _next_page_token = svc.fetch_email_page(page_token=None, limit=50)
+                    next_cursor = svc.get_history_id()
+
+                for r in raw_list:
+                    category = existing_categories.get(r["message_id"])
+                    if category is None:
+                        category = categorize_email(DetectionEmailInput(subject=r["subject"], body=r["body"]))
+                    items.append(EmailItem(
                         subject=r["subject"],
                         body=r["body"],
                         message_id=r["message_id"],
                         rfc_message_id=r.get("rfc_message_id"),
                         sender=r.get("sender"),
                         date=r.get("date"),
-                        category=categorize_email(DetectionEmailInput(subject=r["subject"], body=r["body"])),
+                        category=category,
                         provider="gmail",
-                    )
-                    for r in raw_list
-                ])
+                    ))
                 logger.info("Background sync: fetched %d Gmail emails for user_id=%d", len(raw_list), user_id)
+
+                if next_cursor:
+                    if gmail_sync:
+                        gmail_sync.cursor = next_cursor
+                    else:
+                        db.add(SyncState(user_id=user_id, provider="gmail", cursor=next_cursor))
             except Exception:
                 logger.exception("Background Gmail sync failed for user_id=%d", user_id)
+
+        # --- Outlook ---
         if is_outlook_connected(user_id):
             try:
-                outlook_page, _ = fetch_outlook_email_page(user_id, skip=0, limit=50)
+                outlook_sync = (
+                    db.query(SyncState)
+                    .filter(SyncState.user_id == user_id, SyncState.provider == "outlook")
+                    .first()
+                )
+                delta_link = outlook_sync.cursor if outlook_sync else None
+                outlook_page, new_delta_link = fetch_outlook_delta(user_id, delta_link=delta_link, limit=50)
+
+                for it in outlook_page:
+                    category = existing_categories.get(it.message_id)
+                    if category is None:
+                        category = categorize_email(DetectionEmailInput(subject=it.subject, body=it.body))
+                    it.category = category
                 items.extend(outlook_page)
                 logger.info("Background sync: fetched %d Outlook emails for user_id=%d", len(outlook_page), user_id)
+
+                if new_delta_link:
+                    if outlook_sync:
+                        outlook_sync.cursor = new_delta_link
+                    else:
+                        db.add(SyncState(user_id=user_id, provider="outlook", cursor=new_delta_link))
             except Exception:
                 logger.exception("Background Outlook sync failed for user_id=%d", user_id)
+
         if items:
             _upsert_email_items(db, user_id, items)
+        else:
+            db.commit()  # persist any SyncState cursor updates even if no new mail
     except Exception:
         logger.exception("Background email sync failed for user_id=%d", user_id)
     finally:
@@ -473,15 +632,187 @@ def get_email_body(
     message_id: str,
     provider: str = "gmail",
     current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
 ) -> dict:
-    """Fetch the full body of a single email. Used when opening a Gmail email from the feed."""
+    """Fetch the full body of a single email. Used when opening a Gmail email from the feed.
+
+    Opening an "Info" email is its natural terminal-state signal — the first time this
+    endpoint is called for a given "Info" message, mark the stored Email row as done.
+    Other categories have their own dedicated terminal action (confirm/dismiss,
+    mark-done) and must not be silently marked done just by being opened.
+    """
     if provider == "gmail":
         svc = GmailService()
         if not svc.authenticate_for_user(current_user.id):
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gmail not connected")
         body = svc.fetch_email_body(message_id)
+
+        record = (
+            db.query(Email)
+            .filter(Email.user_id == current_user.id, Email.message_id == message_id)
+            .first()
+        )
+        if record and record.category == "info" and not record.is_done:
+            record.is_done = True
+            db.commit()
+
         return {"body": body}
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown provider")
+
+
+@router.post("/emails/{email_id}/mark-done")
+def mark_email_done(
+    email_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Generic terminal-state endpoint for categories with no other natural
+    "done" signal (Action / En attente / Bons plans)."""
+    record = (
+        db.query(Email)
+        .filter(Email.id == email_id, Email.user_id == current_user.id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+    if record.category not in ("action", "attente", "bonsplans"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="mark-done only applies to action, attente, or bonsplans categories",
+        )
+
+    record.is_done = True
+    db.commit()
+
+    return {"status": "done", "email_id": email_id}
+
+
+@router.post("/emails/{email_id}/mark-read")
+def mark_email_read(
+    email_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Mark an email as opened/read — persisted so the "Lu" badge (and per-category
+    action state, via is_done) survive logout/login, unlike the old local-only
+    frontend state.
+
+    For "Info" category emails, opening is also the natural terminal-state signal
+    (see get_email_body's Gmail-only equivalent above) — setting it here too makes
+    that work uniformly for every provider, not just Gmail.
+    """
+    record = (
+        db.query(Email)
+        .filter(Email.id == email_id, Email.user_id == current_user.id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+
+    record.is_read = True
+    # Only a *stored* "info" category counts — an unclassified email (category is
+    # still None, detection hasn't run yet) must not be marked done just because
+    # it happens to fall back to the "info" tab display-wise.
+    if record.category == "info":
+        record.is_done = True
+    db.commit()
+
+    return {"status": "read", "email_id": email_id, "is_done": record.is_done}
+
+
+class _ReminderProviderResult(BaseModel):
+    provider: str
+    task_id: str | None = None
+    error: str | None = None
+
+
+class _ReminderResponse(BaseModel):
+    status: str
+    email_id: int
+    providers: list[_ReminderProviderResult]
+    message: str
+
+
+@router.post(
+    "/emails/{email_id}/remind",
+    response_model=_ReminderResponse,
+    summary="Create a reminder task from an email",
+)
+def remind_email(
+    email_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> _ReminderResponse:
+    """Create a task reminder in every task service connected by the user.
+
+    A reminder is a task rather than a calendar event because an email in
+    the "En attente" category does not necessarily contain a reliable date.
+    """
+    record = (
+        db.query(Email)
+        .filter(Email.id == email_id, Email.user_id == current_user.id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+    if record.category != "attente":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reminders only apply to emails in the attente category",
+        )
+
+    providers = list(current_user.calendar_providers or [])
+    if not providers and current_user.calendar_provider:
+        providers = [current_user.calendar_provider]
+    if not providers and current_user.gmail_oauth_token:
+        providers = ["google"]
+    if not providers and current_user.outlook_oauth_token:
+        providers = ["outlook"]
+    providers = [p for p in dict.fromkeys(providers) if p in {"google", "outlook"}]
+    if not providers:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Aucun service de tâches connecté. Connectez Google ou Outlook avant de créer un rappel.",
+        )
+
+    title = record.subject or "Rappel depuis un email"
+    notes = record.body or ""
+    results: list[_ReminderProviderResult] = []
+    for provider in providers:
+        result = _ReminderProviderResult(provider=provider)
+        try:
+            if provider == "google":
+                result.task_id = create_google_task(current_user.id, title=title, notes=notes)
+            else:
+                result.task_id = create_outlook_task(current_user.id, title=title, notes=notes)
+        except Exception as exc:
+            result.error = "Impossible de créer le rappel avec ce service"
+            logger.warning(
+                "Reminder creation failed for provider=%s user=%s: %s",
+                provider,
+                current_user.id,
+                exc,
+            )
+        results.append(result)
+
+    if not any(result.task_id for result in results):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Le rappel n’a pas pu être créé auprès des services connectés. Vérifiez leur connexion puis réessayez.",
+        )
+
+    succeeded = [result.provider for result in results if result.task_id]
+    failed = [result.provider for result in results if result.error]
+    if failed:
+        message = f"Rappel créé ({', '.join(succeeded)}) — échec sur {', '.join(failed)}."
+    else:
+        message = "Rappel créé dans vos tâches."
+
+    record.is_done = True
+    db.commit()
+    return _ReminderResponse(
+        status="reminded", email_id=email_id, providers=results, message=message
+    )
 
 
 class _SummarizeRequest(BaseModel):
@@ -506,6 +837,30 @@ async def summarize_email(
     from app.services.openai_service import generate_summary
     summary = await generate_summary(req.subject, req.body)
     return _SummarizeResponse(summary=summary)
+
+
+class _PlanRequest(BaseModel):
+    subject: str = ""
+    body: str = ""
+
+
+class _PlanResponse(BaseModel):
+    steps: list[str]
+
+
+@router.post("/emails/plan", response_model=_PlanResponse)
+async def plan_email_actions(
+    req: _PlanRequest,
+    _: User = Depends(get_current_active_user),
+) -> _PlanResponse:
+    """Generate a short list of suggested next steps for an 'action' category email.
+
+    Detects the email language and writes the steps in that language.
+    Requires OPENAI_API_KEY to be configured; returns an empty list otherwise.
+    """
+    from app.services.openai_service import generate_action_steps
+    steps = await generate_action_steps(req.subject, req.body)
+    return _PlanResponse(steps=steps)
 
 
 @router.post("/emails/reply/{email_id}")
@@ -551,7 +906,7 @@ async def send_email_reply(
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
-        logger.exception("Resend error for email_id=%d", email_id)
+        logger.exception("SMTP error for email_id=%d", email_id)
         raise HTTPException(status_code=502, detail=f"Email delivery failed: {exc}")
 
     return {"status": "sent", "resend_id": sent_id}

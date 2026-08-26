@@ -1,8 +1,9 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_active_user
+from app.core.auth import get_current_active_user, get_verified_user
+from app.core.captcha import verify_turnstile
 from app.core.config import settings
 from app.core.encryption import encrypt
 from app.core.security import create_access_token, hash_password, verify_password
@@ -19,10 +20,18 @@ router = APIRouter(prefix="/users", tags=["users"])
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=UserResponse)
 async def create_user(
     user_in: UserCreate,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Create a new user account. A verification email will be sent to the provided address."""
+    remote_ip = request.client.host if request.client else None
+    if not await verify_turnstile(user_in.captcha_token or "", remote_ip):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CAPTCHA validation failed. Please try again.",
+        )
+
     existing_user = db.query(User).filter_by(email=user_in.email).first()
     if existing_user:
         raise HTTPException(
@@ -53,11 +62,18 @@ async def create_user(
     return user
 
 @router.post("/login", response_model=Token)
-def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+async def login(login_data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """
     Authenticate user and return JWT access token.
     Token expires after ACCESS_TOKEN_EXPIRE_MINUTES (default: 60 minutes).
     """
+    remote_ip = request.client.host if request.client else None
+    if not await verify_turnstile(login_data.captcha_token or "", remote_ip):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CAPTCHA validation failed. Please try again.",
+        )
+
     # Find user by email
     user = db.query(User).filter(User.email == login_data.email).first()
 
@@ -74,13 +90,6 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
             headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # Block unverified accounts
-    if not user.is_email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email address not verified. Check your inbox or request a new link at POST /api/v1/auth/resend-verification.",
         )
 
     # Create access token
@@ -122,7 +131,7 @@ def get_current_user_info(current_user: User = Depends(get_current_active_user))
 @router.patch("/me/change-password", response_model=MessageResponse)
 def change_password(
     body: ChangePasswordRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_verified_user),
     db: Session = Depends(get_db),
 ) -> MessageResponse:
     """Change the authenticated user's password by confirming the current one."""
@@ -185,6 +194,14 @@ def update_user(
 
     # Update fields that were provided
     update_data = user_update.model_dump(exclude_unset=True)
+
+    # Only an admin may change a user's role — otherwise any authenticated
+    # user could self-promote via PATCH /users/{their own id} {"role": "admin"}.
+    if "role" in update_data and current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an admin can change a user's role",
+        )
 
     # Check if email is being changed and if it's already taken
     if "email" in update_data and update_data["email"] != user.email:
@@ -309,7 +326,7 @@ def disconnect_calendar(
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_verified_user),
     db: Session = Depends(get_db)
 ):
     """

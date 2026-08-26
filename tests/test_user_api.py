@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -139,7 +141,7 @@ def test_login_success():
     assert len(data["access_token"]) > 0
 
 def test_login_unverified_user():
-    """Test that login is blocked for unverified users"""
+    """Unverified users can now login — email verification is no longer required to access the app."""
     client.post(
         f"{BASE}/",
         json={
@@ -148,8 +150,7 @@ def test_login_unverified_user():
             "role": "regular"
         }
     )
-    # Do NOT verify email
-
+    # Do NOT verify email — login should still succeed
     response = client.post(
         f"{BASE}/login",
         json={
@@ -157,8 +158,8 @@ def test_login_unverified_user():
             "password": TEST_USER_PASSWORD
         }
     )
-    assert response.status_code == 403
-    assert "verified" in response.json()["detail"].lower()
+    assert response.status_code == 200
+    assert "access_token" in response.json()
 
 def test_login_wrong_password():
     """Test login with wrong password returns 401"""
@@ -284,6 +285,27 @@ def test_update_own_user():
     assert response.status_code == 200
     data = response.json()
     assert data["email"] == "newemail@example.com"
+
+def test_update_own_user_cannot_change_role():
+    """A regular user must not be able to self-promote via PATCH /{user_id}."""
+    create_response = _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
+    user_id = create_response.json()["id"]
+
+    login_response = client.post(
+        f"{BASE}/login",
+        json={
+            "email": TEST_USER_EMAIL,
+            "password": TEST_USER_PASSWORD
+        }
+    )
+    token = login_response.json()["access_token"]
+
+    response = client.patch(
+        f"{BASE}/{user_id}",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"role": "admin"}
+    )
+    assert response.status_code == 403
 
 def test_update_user_password():
     """Test user can update their password via PATCH /{user_id}"""
@@ -466,3 +488,86 @@ def test_admin_can_delete_other_user():
         headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 204
+
+
+class TestCaptcha:
+    """Tests pour le CAPTCHA Turnstile sur POST /users/.
+
+    On patche app.core.captcha.settings pour forcer TURNSTILE_ENABLED=True
+    indépendamment du .env local, et on mocke httpx.AsyncClient pour éviter
+    tout appel réseau réel vers Cloudflare (verify_turnstile est asynchrone
+    pour ne pas bloquer la boucle d'événements le temps de l'appel réseau).
+    """
+
+    def _mock_async_client(self, success: bool | None = None, side_effect: Exception | None = None) -> MagicMock:
+        resp = MagicMock()
+        resp.json.return_value = {"success": success}
+        mock_post = AsyncMock(side_effect=side_effect) if side_effect else AsyncMock(return_value=resp)
+        mock_client = MagicMock()
+        mock_client.__aenter__ = AsyncMock(return_value=MagicMock(post=mock_post))
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        return mock_client
+
+    @patch("app.core.captcha.settings")
+    @patch("app.core.captcha.httpx.AsyncClient")
+    def test_valid_captcha_token_creates_user(self, mock_async_client_cls, mock_settings):
+        """Token validé par Cloudflare → inscription réussit (201)."""
+        mock_settings.TURNSTILE_ENABLED = True
+        mock_settings.TURNSTILE_SECRET_KEY = "test-secret"
+        mock_async_client_cls.return_value = self._mock_async_client(success=True)
+
+        r = client.post(f"{BASE}/", json={
+            "email": "captcha_ok@example.com",
+            "password": "Secret12!",
+            "role": "regular",
+            "captcha_token": "valid-token",
+        })
+        assert r.status_code == 201
+
+    @patch("app.core.captcha.settings")
+    @patch("app.core.captcha.httpx.AsyncClient")
+    def test_rejected_captcha_token_returns_400(self, mock_async_client_cls, mock_settings):
+        """Token rejeté par Cloudflare → 400 CAPTCHA validation failed."""
+        mock_settings.TURNSTILE_ENABLED = True
+        mock_settings.TURNSTILE_SECRET_KEY = "test-secret"
+        mock_async_client_cls.return_value = self._mock_async_client(success=False)
+
+        r = client.post(f"{BASE}/", json={
+            "email": "captcha_fail@example.com",
+            "password": "Secret12!",
+            "role": "regular",
+            "captcha_token": "invalid-token",
+        })
+        assert r.status_code == 400
+        assert "captcha" in r.json()["detail"].lower()
+
+    @patch("app.core.captcha.settings")
+    @patch("app.core.captcha.httpx.AsyncClient")
+    def test_captcha_network_error_returns_400(self, mock_async_client_cls, mock_settings):
+        """Erreur réseau vers Cloudflare → fail-closed → 400."""
+        mock_settings.TURNSTILE_ENABLED = True
+        mock_settings.TURNSTILE_SECRET_KEY = "test-secret"
+        mock_async_client_cls.return_value = self._mock_async_client(side_effect=Exception("network error"))
+
+        r = client.post(f"{BASE}/", json={
+            "email": "captcha_err@example.com",
+            "password": "Secret12!",
+            "role": "regular",
+            "captcha_token": "any-token",
+        })
+        assert r.status_code == 400
+
+    @patch("app.core.captcha.settings")
+    @patch("app.core.captcha.httpx.AsyncClient")
+    def test_login_rejects_invalid_captcha(self, mock_async_client_cls, mock_settings):
+        """Token rejeté par Cloudflare au login → 400, pas de token émis."""
+        mock_settings.TURNSTILE_ENABLED = True
+        mock_settings.TURNSTILE_SECRET_KEY = "test-secret"
+        mock_async_client_cls.return_value = self._mock_async_client(success=False)
+
+        r = client.post(f"{BASE}/login", json={
+            "email": "someone@example.com",
+            "password": "Secret12!",
+            "captcha_token": "invalid-token",
+        })
+        assert r.status_code == 400

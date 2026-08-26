@@ -22,6 +22,7 @@ class UserCreate(BaseModel):
     name: str | None = None
     profile_icon: str | None = None
     role: str = "regular"
+    captcha_token: str | None = None  # Cloudflare Turnstile — validé côté backend
 
     @field_validator("password")
     @classmethod
@@ -74,6 +75,7 @@ class UserUpdate(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    captcha_token: str | None = None  # Cloudflare Turnstile — validé côté backend
 
 
 class Token(BaseModel):

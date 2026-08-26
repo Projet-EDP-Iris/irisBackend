@@ -1,8 +1,9 @@
 import logging
-import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import RedirectResponse
 
 from app.api.endpoints.calendar import router as calendar_router
 from app.api.endpoints.emails import router as email_router
@@ -55,15 +56,26 @@ ALLOWED_ORIGINS = [
     "http://localhost:8080",
     "https://one-page-site-nine.vercel.app",
     "https://one-page-site-ten.vercel.app",
-    "null",  # Packaged Electron .exe loads from file://, which sends Origin: null
+    "null",  # Packaged Electron .exe loads from file://.
 ]
 
-if os.getenv("ENVIRONMENT", "development") != "production":
+if settings.ENVIRONMENT.lower() != "production":
     ALLOWED_ORIGINS.extend([
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
         "http://127.0.0.1:8080",
     ])
+
+class HTTPSRedirectExceptHealthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        # Render probes /health over the internal HTTP port; do not redirect it.
+        if request.url.path != "/health" and request.url.scheme == "http":
+            return RedirectResponse(str(request.url.replace(scheme="https")), status_code=307)
+        return await call_next(request)
+
+
+if settings.ENVIRONMENT.lower() == "production":
+    app.add_middleware(HTTPSRedirectExceptHealthMiddleware)
 
 app.add_middleware(
     CORSMiddleware,

@@ -6,6 +6,7 @@ from app.core.auth import get_current_active_user, get_verified_user
 from app.core.captcha import verify_turnstile
 from app.core.config import settings
 from app.core.encryption import encrypt
+from app.core.rate_limiter import login_limiter, registration_limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.database import get_db
 from app.models.auth_token import TokenType
@@ -17,6 +18,23 @@ from app.services.email_service import send_verification_email
 
 router = APIRouter(prefix="/users", tags=["users"])
 
+
+def _client_ip(request: Request) -> str:
+    """Use the direct peer address; reverse proxies must be configured explicitly."""
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_rate_limit(*, limiter, key: str) -> None:
+    if limiter.is_allowed(key):
+        return
+    retry_after = limiter.seconds_until_reset(key)
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Too many attempts. Please try again later.",
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=UserResponse)
 async def create_user(
     user_in: UserCreate,
@@ -25,8 +43,8 @@ async def create_user(
     db: Session = Depends(get_db),
 ):
     """Create a new user account. A verification email will be sent to the provided address."""
-    remote_ip = request.client.host if request.client else None
-    if not await verify_turnstile(user_in.captcha_token or "", remote_ip):
+    _enforce_rate_limit(limiter=registration_limiter, key=_client_ip(request))
+    if not await verify_turnstile(user_in.captcha_token or "", _client_ip(request)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="CAPTCHA validation failed. Please try again.",
@@ -67,8 +85,12 @@ async def login(login_data: LoginRequest, request: Request, db: Session = Depend
     Authenticate user and return JWT access token.
     Token expires after ACCESS_TOKEN_EXPIRE_MINUTES (default: 60 minutes).
     """
-    remote_ip = request.client.host if request.client else None
-    if not await verify_turnstile(login_data.captcha_token or "", remote_ip):
+    # Limit each source and account pair to slow credential stuffing.
+    _enforce_rate_limit(
+        limiter=login_limiter,
+        key=f"{_client_ip(request)}:{login_data.email.casefold()}",
+    )
+    if not await verify_turnstile(login_data.captcha_token or "", _client_ip(request)):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="CAPTCHA validation failed. Please try again.",

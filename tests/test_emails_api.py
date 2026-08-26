@@ -88,10 +88,11 @@ def test_get_emails_unauthorized(client_with_db, setup_database):
 
 @patch("app.services.gmail_service._load_gmail_token_from_db", return_value=None)
 @patch("app.services.outlook_email_service._load_outlook_token_from_db", return_value=None)
-def test_get_emails_not_connected_returns_404(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+def test_get_emails_not_connected_returns_empty_list(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+    """No mailbox connected → returns 200 with empty list (frontend shows onboarding state)."""
     r = client_with_db.get("/api/v1/emails", headers=auth_headers)
-    assert r.status_code == 404
-    assert "email provider" in r.json().get("detail", "").lower()
+    assert r.status_code == 200
+    assert r.json() == []
 
 
 @patch("app.api.endpoints.emails.is_outlook_connected", return_value=False)
@@ -139,9 +140,12 @@ def test_fetch_and_detect_unauthorized(client_with_db, setup_database):
 
 @patch("app.services.gmail_service._load_gmail_token_from_db", return_value=None)
 @patch("app.services.outlook_email_service._load_outlook_token_from_db", return_value=None)
-def test_fetch_and_detect_not_connected_returns_404(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+def test_fetch_and_detect_not_connected_returns_empty(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+    """No mailbox connected → returns 200 with empty emails and extractions."""
     r = client_with_db.post("/api/v1/emails/fetch-and-detect", headers=auth_headers)
-    assert r.status_code == 404
+    assert r.status_code == 200
+    assert r.json()["emails"] == []
+    assert r.json()["extractions"] == []
 
 
 @patch("app.api.endpoints.emails.is_outlook_connected", return_value=False)
@@ -176,9 +180,13 @@ def test_fetch_detect_predict_unauthorized(client_with_db, setup_database):
 
 @patch("app.services.gmail_service._load_gmail_token_from_db", return_value=None)
 @patch("app.services.outlook_email_service._load_outlook_token_from_db", return_value=None)
-def test_fetch_detect_predict_not_connected_returns_404(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+def test_fetch_detect_predict_not_connected_returns_empty(mock_outlook, mock_gmail, client_with_db, setup_database, auth_headers):
+    """No mailbox connected → returns 200 with empty structure, no fabricated slots."""
     r = client_with_db.post("/api/v1/emails/fetch-detect-predict", headers=auth_headers)
-    assert r.status_code == 404
+    assert r.status_code == 200
+    assert r.json()["emails"] == []
+    assert r.json()["extractions"] == []
+    assert r.json()["suggested_slots"] == []
 
 
 @patch("app.api.endpoints.emails.is_outlook_connected", return_value=False)
@@ -416,3 +424,48 @@ def test_get_emails_hydrates_persisted_state(mock_gmail, mock_load_token, _mock_
     assert len(data) == 1
     assert data[0]["is_done"] is True
     assert data[0]["is_read"] is True
+
+
+# --- reminders: expose provider outcome to the frontend ---
+
+
+def _set_task_providers(providers: list[str]) -> None:
+    db = TestSessionLocal()
+    try:
+        user = db.query(User).filter_by(email="emails@example.com").first()
+        user.calendar_providers = providers
+        user.calendar_provider = providers[0] if providers else None
+        db.commit()
+    finally:
+        db.close()
+
+
+@patch("app.api.endpoints.emails.create_google_task", return_value="google-task-1")
+def test_remind_returns_success_message(mock_google_task, client_with_db, setup_database, auth_headers):
+    email_id = _seed_email("emails@example.com", "remind_google", "attente")
+    _set_task_providers(["google"])
+
+    response = client_with_db.post(f"/api/v1/emails/{email_id}/remind", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Rappel créé dans vos tâches."
+    assert response.json()["providers"] == [
+        {"provider": "google", "task_id": "google-task-1", "error": None}
+    ]
+    mock_google_task.assert_called_once()
+
+
+@patch("app.api.endpoints.emails.create_outlook_task", side_effect=RuntimeError("provider unavailable"))
+@patch("app.api.endpoints.emails.create_google_task", return_value="google-task-1")
+def test_remind_returns_partial_provider_message(
+    mock_google_task, _mock_outlook_task, client_with_db, setup_database, auth_headers
+):
+    email_id = _seed_email("emails@example.com", "remind_partial", "attente")
+    _set_task_providers(["google", "outlook"])
+
+    response = client_with_db.post(f"/api/v1/emails/{email_id}/remind", headers=auth_headers)
+
+    assert response.status_code == 200
+    assert response.json()["message"] == "Rappel créé (google) — échec sur outlook."
+    assert response.json()["providers"][1]["error"] == "Impossible de créer le rappel avec ce service"
+    mock_google_task.assert_called_once()

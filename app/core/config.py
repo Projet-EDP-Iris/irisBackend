@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = Field(default="http://localhost:5173")
 
     # Cloudflare Turnstile CAPTCHA (protège POST /users/ contre les inscriptions automatisées)
+    # Clés de test : Site Key = 1x00000000000000000000AA / Secret = 1x0000000000000000000000000000000AA
     TURNSTILE_ENABLED: bool = Field(default=False)
     TURNSTILE_SECRET_KEY: str | None = Field(default=None)
 
@@ -64,11 +65,6 @@ class Settings(BaseSettings):
     SMTP_USERNAME: str | None = Field(default=None)
     SMTP_PASSWORD: str | None = Field(default=None)
     SMTP_FROM_EMAIL: str = Field(default="noreply@iris-app.com")
-
-    # Cloudflare Turnstile CAPTCHA (protège POST /users/ contre les inscriptions automatisées)
-    # Clés de test : Site Key = 1x00000000000000000000AA / Secret = 1x0000000000000000000000000000000AA
-    TURNSTILE_ENABLED: bool = Field(default=False)
-    TURNSTILE_SECRET_KEY: str | None = Field(default=None)
 
     # Token expiry
     PASSWORD_RESET_TOKEN_EXPIRE_MINUTES: int = Field(default=30)

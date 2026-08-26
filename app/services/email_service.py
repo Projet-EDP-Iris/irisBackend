@@ -1,26 +1,38 @@
 import logging
-
-import resend
+import smtplib
+import ssl
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 
-def _send_resend(to_email: str, subject: str, html_body: str) -> None:
-    if not settings.RESEND_API_KEY:
-        raise ValueError("RESEND_API_KEY is not configured.")
-    resend.api_key = settings.RESEND_API_KEY
-    response = resend.Emails.send({
-        "from": settings.RESEND_FROM_EMAIL,
-        "to": [to_email],
-        "subject": subject,
-        "html": html_body,
-    })
-    logger.info("Email sent via Resend id=%s to=%s", response.get("id"), to_email)
+def _send_smtp(to_email: str, subject: str, html_body: str) -> None:
+    """Send an email via SMTP (smtplib stdlib — zero external dependency)."""
+    if not settings.SMTP_USERNAME or not settings.SMTP_PASSWORD:
+        raise ValueError(
+            "SMTP_USERNAME and SMTP_PASSWORD must be set in .env to send emails."
+        )
+
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"] = settings.SMTP_FROM_EMAIL
+    msg["To"] = to_email
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+
+    context = ssl.create_default_context()
+    with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+        if settings.SMTP_USE_TLS:
+            server.starttls(context=context)
+        server.login(settings.SMTP_USERNAME, settings.SMTP_PASSWORD)
+        server.sendmail(settings.SMTP_FROM_EMAIL, to_email, msg.as_string())
+
+    logger.info("Email sent via SMTP to=%s subject=%r", to_email, subject)
 
 
-async def send_password_reset_email(to_email: str, token: str) -> None:
+def send_password_reset_email(to_email: str, token: str) -> None:
     if not settings.EMAIL_ENABLED:
         logger.info("EMAIL_ENABLED=False — skipping password reset email to %s", to_email)
         return
@@ -32,12 +44,12 @@ async def send_password_reset_email(to_email: str, token: str) -> None:
         "<p>If you did not request this, you can safely ignore this email.</p>"
     )
     try:
-        _send_resend(to_email, "Reset your Iris password", html)
+        _send_smtp(to_email, "Reset your Iris password", html)
     except Exception:
         logger.exception("Failed to send password reset email to %s", to_email)
 
 
-async def send_verification_email(to_email: str, token: str) -> None:
+def send_verification_email(to_email: str, token: str) -> None:
     if not settings.EMAIL_ENABLED:
         logger.info("EMAIL_ENABLED=False — skipping verification email to %s", to_email)
         return
@@ -49,6 +61,6 @@ async def send_verification_email(to_email: str, token: str) -> None:
         "<p>If you did not create an Iris account, you can safely ignore this email.</p>"
     )
     try:
-        _send_resend(to_email, "Verify your Iris email address", html)
+        _send_smtp(to_email, "Verify your Iris email address", html)
     except Exception:
         logger.exception("Failed to send verification email to %s", to_email)

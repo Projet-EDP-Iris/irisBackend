@@ -890,7 +890,7 @@ async def send_email_reply(
     except ValueError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except Exception as exc:
-        logger.exception("Resend error for email_id=%d", email_id)
+        logger.exception("SMTP error for email_id=%d", email_id)
         raise HTTPException(status_code=502, detail=f"Email delivery failed: {exc}")
 
     return {"status": "sent", "resend_id": sent_id}

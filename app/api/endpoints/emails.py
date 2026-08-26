@@ -168,7 +168,7 @@ def _get_outlook_emails(user_id: int, max_results: int | None = None) -> list[Em
 def _get_all_emails_for_user(user_id: int, max_results: int | None = None) -> list[EmailItem]:
     """
     Merge Gmail and Outlook emails for a user.
-    - Returns 404 if neither Gmail nor Outlook is connected.
+    - Returns an empty list if neither Gmail nor Outlook is connected.
     - Silently skips a source that fails but returns results from the other.
     - Returns emails sorted by date (most recent first). max_results=None fetches all.
     """
@@ -212,7 +212,7 @@ def get_emails(
     Fetch recent emails for the authenticated user.
 
     Aggregates from all connected providers (Gmail and/or Outlook).
-    Returns HTTP 404 if neither Gmail nor Outlook is connected.
+    Returns an empty list if neither Gmail nor Outlook is connected.
     Emails that already have a stored category are not reclassified — only
     uncategorized/new ones run through NLP detection (mirrors /emails/feed).
     """
@@ -246,7 +246,7 @@ def post_fetch_and_detect(
 ) -> FetchAndDetectResponse:
     """
     Fetch recent emails (Gmail + Outlook) and run NLP detection on each.
-    Returns HTTP 404 if no email provider is connected.
+    Returns an empty result if no email provider is connected.
     Emails that already have a stored category skip NLP detection — a cheap
     placeholder ExtractionResult derived from the stored category is returned
     instead (mirrors /emails/feed's existing-category skip).
@@ -295,7 +295,7 @@ async def post_fetch_detect_predict(
 ) -> FetchDetectPredictResponse:
     """
     Fetch emails (Gmail + Outlook), run detection + async enrichment, then prediction.
-    Returns HTTP 404 if no email provider is connected.
+    Returns an empty result if no email provider is connected.
     Emails that already have a stored category skip NLP detection (mirrors
     /emails/feed's existing-category skip) — only new/uncategorized emails
     run through the detect_batch pipeline.
@@ -307,6 +307,13 @@ async def post_fetch_detect_predict(
     email_items = await asyncio.to_thread(
         _get_all_emails_for_user, current_user.id, max_results
     )
+    if not email_items:
+        # No mailbox connected (or empty inbox) — don't fabricate a suggestion
+        # from a blank ExtractionResult, just return an empty structure.
+        return FetchDetectPredictResponse(
+            emails=[], extractions=[], suggested_slots=[],
+            status=PredictionStatus.READY_TO_SCHEDULE,
+        )
     existing_categories = _load_existing_categories(db, current_user.id)
 
     to_detect = [e for e in email_items if not existing_categories.get(e.message_id)]

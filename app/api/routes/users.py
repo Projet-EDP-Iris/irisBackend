@@ -26,7 +26,7 @@ async def create_user(
 ):
     """Create a new user account. A verification email will be sent to the provided address."""
     remote_ip = request.client.host if request.client else None
-    if not verify_turnstile(user_in.captcha_token or "", remote_ip):
+    if not await verify_turnstile(user_in.captcha_token or "", remote_ip):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="CAPTCHA validation failed. Please try again.",
@@ -62,11 +62,18 @@ async def create_user(
     return user
 
 @router.post("/login", response_model=Token)
-def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+async def login(login_data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """
     Authenticate user and return JWT access token.
     Token expires after ACCESS_TOKEN_EXPIRE_MINUTES (default: 60 minutes).
     """
+    remote_ip = request.client.host if request.client else None
+    if not await verify_turnstile(login_data.captcha_token or "", remote_ip):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CAPTCHA validation failed. Please try again.",
+        )
+
     # Find user by email
     user = db.query(User).filter(User.email == login_data.email).first()
 
@@ -187,6 +194,14 @@ def update_user(
 
     # Update fields that were provided
     update_data = user_update.model_dump(exclude_unset=True)
+
+    # Only an admin may change a user's role — otherwise any authenticated
+    # user could self-promote via PATCH /users/{their own id} {"role": "admin"}.
+    if "role" in update_data and current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an admin can change a user's role",
+        )
 
     # Check if email is being changed and if it's already taken
     if "email" in update_data and update_data["email"] != user.email:

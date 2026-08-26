@@ -75,6 +75,7 @@ class UserUpdate(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    captcha_token: str | None = None  # Cloudflare Turnstile — validé côté backend
 
 
 class Token(BaseModel):

@@ -101,3 +101,39 @@ def init_db():
             ))
         except Exception:
             pass
+
+    # Add ON DELETE CASCADE to user_id foreign keys that predate it (emails,
+    # processing_state, sync_state) — without this, deleting a user with any
+    # associated row in these tables fails with a foreign-key violation on
+    # Postgres, silently breaking account deletion (GDPR right to erasure).
+    # SQLite can't alter constraints in place, but a fresh SQLite DB already
+    # gets the correct constraint from create_all() above, so skip there.
+    if not _db_url.startswith("sqlite"):
+        with engine.begin() as connection:
+            inspector = inspect(connection)
+            for table, column in (
+                ("emails", "user_id"),
+                ("processing_state", "user_id"),
+                ("sync_state", "user_id"),
+            ):
+                try:
+                    foreign_keys = inspector.get_foreign_keys(table)
+                except Exception:
+                    continue
+                for fk in foreign_keys:
+                    if column not in fk.get("constrained_columns", []):
+                        continue
+                    if (fk.get("options") or {}).get("ondelete") == "CASCADE":
+                        break
+                    name = fk.get("name")
+                    if not name:
+                        break
+                    referred_table = fk["referred_table"]
+                    referred_column = fk["referred_columns"][0]
+                    connection.execute(text(f'ALTER TABLE {table} DROP CONSTRAINT "{name}"'))
+                    connection.execute(text(
+                        f'ALTER TABLE {table} ADD CONSTRAINT "{name}" '
+                        f'FOREIGN KEY ({column}) REFERENCES {referred_table} ({referred_column}) '
+                        f'ON DELETE CASCADE'
+                    ))
+                    break

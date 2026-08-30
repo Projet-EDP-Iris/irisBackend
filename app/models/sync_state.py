@@ -19,6 +19,6 @@ class SyncState(Base, TimestampMixin):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True)
     provider: Mapped[str] = mapped_column(String(20))  # "gmail" | "outlook"
     cursor: Mapped[str | None] = mapped_column(String(2048), nullable=True)

@@ -304,14 +304,14 @@ docker-compose exec postgres psql -U iris_user -d iris_db
 
 ## Contributing Workflow
 
-We use **develop** as the integration branch. Feature branches merge into **develop**; when develop is stable, open a PR from **develop** to **main**. CI runs on pull requests to **develop** and **main** (tests, coverage, lint).
+A **develop** integration branch exists but is not part of the actual workflow in practice — every change is merged directly into **main** via a feature/fix branch and a pull request. CI runs on pull requests and pushes to both **develop** and **main** (tests, coverage, lint), but **develop** itself is not kept up to date and should not be branched from.
 
-1. `git checkout -b feature/your-feature-name`
+1. `git checkout -b feature/your-feature-name main`
 2. Make changes, commit
 3. `git push origin feature/your-feature-name`
-4. Open PR targeting **develop** on GitHub
+4. Open PR targeting **main** on GitHub
 5. CI must pass (tests, coverage ≥ 60%, lint)
-6. Keep branch up-to-date: `git merge develop` before merging
+6. Keep branch up-to-date: `git merge main` before merging
 
 ---
 

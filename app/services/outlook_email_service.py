@@ -27,6 +27,10 @@ _GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 # Fields we request from the Graph API (minimise payload)
 _SELECT = "id,subject,body,from,receivedDateTime,isRead,isDraft,internetMessageId"
 
+# Sanity cap on pages walked to reach @odata.deltaLink on a fresh baseline —
+# see fetch_outlook_delta. At 50 messages/page this is 25,000 messages.
+_MAX_BASELINE_PAGES = 500
+
 
 def is_outlook_connected(user_id: int) -> bool:
     """Return True if the user has a stored Outlook OAuth token in the DB."""
@@ -177,8 +181,20 @@ def fetch_outlook_delta(
         next_url = f"{_GRAPH_BASE}/me/mailFolders/inbox/messages/delta"
         params = {"$select": _SELECT, "$top": str(limit)}
 
+    # Graph only hands back @odata.deltaLink on the very last page of results, so
+    # establishing a fresh baseline (delta_link=None) means paging all the way
+    # through the mailbox even if we only need the first `limit` messages for
+    # this call — there's no API shortcut. Stopping early (as this used to do)
+    # meant new_delta_link stayed None forever for any mailbox over `limit`
+    # messages, so every login re-baselined from scratch (see issue #103). This
+    # runs as a login-triggered background task, not on the request path, so
+    # the extra time on a large mailbox's first sync doesn't block the user.
+    # _MAX_BASELINE_PAGES is just a sanity cap against a pathological mailbox
+    # looping forever — if hit, we still return what we have (no delta cursor
+    # yet, so the next sync re-baselines and tries again).
     all_messages: list[dict] = []
     new_delta_link: str | None = None
+    pages_fetched = 0
     while next_url:
         resp = httpx.get(
             next_url,
@@ -195,13 +211,22 @@ def fetch_outlook_delta(
         params = None  # nextLink/deltaLink already contain all query params
         new_delta_link = data.get("@odata.deltaLink", new_delta_link)
         next_url = data.get("@odata.nextLink")
+        pages_fetched += 1
 
-        if delta_link is None and len(all_messages) >= limit:
-            all_messages = all_messages[:limit]
+        if next_url and pages_fetched >= _MAX_BASELINE_PAGES:
+            logger.warning(
+                "Outlook delta baseline for user_id=%d exceeded %d pages — giving up on "
+                "reaching @odata.deltaLink this sync; will retry baselining next time.",
+                user_id, _MAX_BASELINE_PAGES,
+            )
             break
 
-    logger.info("Fetched %d Outlook messages via delta for user_id=%d", len(all_messages), user_id)
-    return [_parse_email_item(m) for m in all_messages], new_delta_link
+    returned_messages = all_messages[:limit] if delta_link is None else all_messages
+    logger.info(
+        "Fetched %d Outlook messages via delta for user_id=%d (%d pages, baseline=%s)",
+        len(returned_messages), user_id, pages_fetched, delta_link is None,
+    )
+    return [_parse_email_item(m) for m in returned_messages], new_delta_link
 
 
 def get_outlook_connection_status(user_id: int) -> dict:

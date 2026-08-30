@@ -144,6 +144,123 @@ class TestFetchOutlookEmails:
         assert result == []
 
 
+class TestFetchOutlookDelta:
+    """fetch_outlook_delta must page all the way to @odata.deltaLink on a fresh
+    baseline (delta_link=None), even past `limit` messages, since Graph only
+    returns deltaLink on the final page (issue #103)."""
+
+    def test_baseline_pages_past_limit_to_reach_delta_link(self, monkeypatch):
+        """A mailbox with more messages than `limit` must still yield a delta
+        cursor by walking every @odata.nextLink page."""
+        monkeypatch.setattr(
+            "app.services.outlook_email_service.get_valid_token",
+            lambda uid: "fake-access-token",
+        )
+
+        page_1 = MagicMock()
+        page_1.raise_for_status = MagicMock()
+        page_1.json.return_value = {
+            "value": [_make_graph_message(msg_id=f"M{i}") for i in range(50)],
+            "@odata.nextLink": "https://graph.microsoft.com/v1.0/next-page-2",
+        }
+        page_2 = MagicMock()
+        page_2.raise_for_status = MagicMock()
+        page_2.json.return_value = {
+            "value": [_make_graph_message(msg_id=f"M{i}") for i in range(50, 70)],
+            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta-cursor-abc",
+        }
+
+        with patch("app.services.outlook_email_service.httpx.get", side_effect=[page_1, page_2]):
+            from app.services.outlook_email_service import fetch_outlook_delta
+            emails, new_delta_link = fetch_outlook_delta(user_id=1, delta_link=None, limit=50)
+
+        assert new_delta_link == "https://graph.microsoft.com/v1.0/delta-cursor-abc"
+        # Still only returns the first `limit` messages for this call, even
+        # though it had to walk further to reach the delta cursor.
+        assert len(emails) == 50
+
+    def test_baseline_single_page_returns_delta_link_immediately(self, monkeypatch):
+        """A mailbox under `limit` messages gets its deltaLink on the first page."""
+        monkeypatch.setattr(
+            "app.services.outlook_email_service.get_valid_token",
+            lambda uid: "fake-access-token",
+        )
+        page = MagicMock()
+        page.raise_for_status = MagicMock()
+        page.json.return_value = {
+            "value": [_make_graph_message(msg_id="M1")],
+            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta-cursor-xyz",
+        }
+
+        with patch("app.services.outlook_email_service.httpx.get", return_value=page):
+            from app.services.outlook_email_service import fetch_outlook_delta
+            emails, new_delta_link = fetch_outlook_delta(user_id=1, delta_link=None, limit=50)
+
+        assert new_delta_link == "https://graph.microsoft.com/v1.0/delta-cursor-xyz"
+        assert len(emails) == 1
+
+    def test_incremental_sync_with_existing_delta_link_does_not_over_fetch(self, monkeypatch):
+        """When a delta_link is already stored, only messages since last sync
+        are fetched — the `limit` cap only applies to a fresh baseline."""
+        monkeypatch.setattr(
+            "app.services.outlook_email_service.get_valid_token",
+            lambda uid: "fake-access-token",
+        )
+        page = MagicMock()
+        page.raise_for_status = MagicMock()
+        page.json.return_value = {
+            "value": [_make_graph_message(msg_id=f"M{i}") for i in range(75)],
+            "@odata.deltaLink": "https://graph.microsoft.com/v1.0/delta-cursor-next",
+        }
+
+        with patch("app.services.outlook_email_service.httpx.get", return_value=page) as mock_get:
+            from app.services.outlook_email_service import fetch_outlook_delta
+            emails, new_delta_link = fetch_outlook_delta(
+                user_id=1, delta_link="https://graph.microsoft.com/v1.0/delta-cursor-prev", limit=50
+            )
+
+        # Incremental sync isn't capped at `limit` — all 75 changed messages come back.
+        assert len(emails) == 75
+        assert new_delta_link == "https://graph.microsoft.com/v1.0/delta-cursor-next"
+        mock_get.assert_called_once_with(
+            "https://graph.microsoft.com/v1.0/delta-cursor-prev",
+            params=None,
+            headers={
+                "Authorization": "Bearer fake-access-token",
+                "Prefer": 'outlook.body-content-type="text"',
+            },
+            timeout=30,
+        )
+
+    def test_baseline_gives_up_after_max_pages_without_crashing(self, monkeypatch):
+        """A pathologically large mailbox must not loop forever — it should
+        stop at the safety cap and return no delta cursor (next sync retries)."""
+        monkeypatch.setattr(
+            "app.services.outlook_email_service.get_valid_token",
+            lambda uid: "fake-access-token",
+        )
+        monkeypatch.setattr("app.services.outlook_email_service._MAX_BASELINE_PAGES", 2)
+
+        def make_page(page_num: int) -> MagicMock:
+            page = MagicMock()
+            page.raise_for_status = MagicMock()
+            page.json.return_value = {
+                "value": [_make_graph_message(msg_id=f"P{page_num}")],
+                "@odata.nextLink": f"https://graph.microsoft.com/v1.0/page-{page_num + 1}",
+            }
+            return page
+
+        with patch(
+            "app.services.outlook_email_service.httpx.get",
+            side_effect=[make_page(1), make_page(2), make_page(3)],
+        ) as mock_get:
+            from app.services.outlook_email_service import fetch_outlook_delta
+            emails, new_delta_link = fetch_outlook_delta(user_id=1, delta_link=None, limit=50)
+
+        assert new_delta_link is None
+        assert mock_get.call_count == 2
+
+
 # ---------------------------------------------------------------------------
 # get_outlook_connection_status
 # ---------------------------------------------------------------------------

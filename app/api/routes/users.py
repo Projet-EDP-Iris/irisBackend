@@ -1,28 +1,63 @@
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_active_user
+from app.core.auth import get_current_active_user, get_verified_user
+from app.core.captcha import verify_turnstile
 from app.core.config import settings
 from app.core.encryption import encrypt
+from app.core.rate_limiter import login_limiter, registration_limiter
 from app.core.security import create_access_token, hash_password, verify_password
 from app.db.database import get_db
 from app.models.auth_token import TokenType
 from app.models.user import User
 from app.schemas.auth import ChangePasswordRequest, MessageResponse
-from app.schemas.user import LoginRequest, Token, UserCreate, UserResponse, UserUpdate
+from app.schemas.user import (
+    LoginRequest,
+    RefreshRequest,
+    Token,
+    UserCreate,
+    UserResponse,
+    UserUpdate,
+)
 from app.services.auth_token_service import create_token
 from app.services.email_service import send_verification_email
+from app.services.refresh_token_service import consume_refresh_token, create_refresh_token
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+
+def _client_ip(request: Request) -> str:
+    """Use the direct peer address; reverse proxies must be configured explicitly."""
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_rate_limit(*, limiter, key: str) -> None:
+    if limiter.is_allowed(key):
+        return
+    retry_after = limiter.seconds_until_reset(key)
+    raise HTTPException(
+        status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        detail="Too many attempts. Please try again later.",
+        headers={"Retry-After": str(retry_after)},
+    )
+
 
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=UserResponse)
 async def create_user(
     user_in: UserCreate,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     """Create a new user account. A verification email will be sent to the provided address."""
+    _enforce_rate_limit(limiter=registration_limiter, key=_client_ip(request))
+    if not await verify_turnstile(user_in.captcha_token or "", _client_ip(request)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CAPTCHA validation failed. Please try again.",
+        )
+
     existing_user = db.query(User).filter_by(email=user_in.email).first()
     if existing_user:
         raise HTTPException(
@@ -53,11 +88,22 @@ async def create_user(
     return user
 
 @router.post("/login", response_model=Token)
-def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+async def login(login_data: LoginRequest, request: Request, db: Session = Depends(get_db)):
     """
     Authenticate user and return JWT access token.
     Token expires after ACCESS_TOKEN_EXPIRE_MINUTES (default: 60 minutes).
     """
+    # Limit each source and account pair to slow credential stuffing.
+    _enforce_rate_limit(
+        limiter=login_limiter,
+        key=f"{_client_ip(request)}:{login_data.email.casefold()}",
+    )
+    if not await verify_turnstile(login_data.captcha_token or "", _client_ip(request)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="CAPTCHA validation failed. Please try again.",
+        )
+
     # Find user by email
     user = db.query(User).filter(User.email == login_data.email).first()
 
@@ -76,13 +122,6 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    # Block unverified accounts
-    if not user.is_email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Email address not verified. Check your inbox or request a new link at POST /api/v1/auth/resend-verification.",
-        )
-
     # Create access token
     access_token = create_access_token(
         subject=str(user.id),
@@ -92,7 +131,46 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)):
         minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
     )
 
-    return Token(access_token=access_token, token_type="bearer")
+    refresh_token = None
+    if login_data.remember_me:
+        refresh_token = create_refresh_token(db, user.id)
+        db.commit()
+
+    return Token(access_token=access_token, token_type="bearer", refresh_token=refresh_token)
+
+
+@router.post("/refresh", response_model=Token)
+def refresh_access_token(body: RefreshRequest, db: Session = Depends(get_db)):
+    """
+    Exchange a valid refresh token (issued at login with remember_me=true) for a
+    new access token, without re-entering credentials. Rotates the refresh token
+    on every use: the old one is revoked and a new one is returned alongside the
+    new access token, so a stolen-but-unused refresh token stops working the
+    next time the legitimate client uses it.
+    """
+    record = consume_refresh_token(db, body.refresh_token)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    user = db.query(User).filter(User.id == record.user_id).first()
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
+    record.revoked = True
+    new_refresh_token = create_refresh_token(db, user.id)
+    db.commit()
+
+    access_token = create_access_token(
+        subject=str(user.id),
+        data={"email": user.email, "role": user.role},
+        secret=settings.SECRET_KEY,
+        algorithm=settings.ALGORITHM,
+        minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+    return Token(access_token=access_token, token_type="bearer", refresh_token=new_refresh_token)
 
 @router.get(
     "/",
@@ -122,7 +200,7 @@ def get_current_user_info(current_user: User = Depends(get_current_active_user))
 @router.patch("/me/change-password", response_model=MessageResponse)
 def change_password(
     body: ChangePasswordRequest,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_verified_user),
     db: Session = Depends(get_db),
 ) -> MessageResponse:
     """Change the authenticated user's password by confirming the current one."""
@@ -185,6 +263,14 @@ def update_user(
 
     # Update fields that were provided
     update_data = user_update.model_dump(exclude_unset=True)
+
+    # Only an admin may change a user's role — otherwise any authenticated
+    # user could self-promote via PATCH /users/{their own id} {"role": "admin"}.
+    if "role" in update_data and current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an admin can change a user's role",
+        )
 
     # Check if email is being changed and if it's already taken
     if "email" in update_data and update_data["email"] != user.email:
@@ -309,7 +395,7 @@ def disconnect_calendar(
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_user(
     user_id: int,
-    current_user: User = Depends(get_current_active_user),
+    current_user: User = Depends(get_verified_user),
     db: Session = Depends(get_db)
 ):
     """

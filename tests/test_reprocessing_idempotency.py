@@ -159,3 +159,54 @@ def test_two_consecutive_syncs_do_not_duplicate_or_reclassify(
     # categorize_email must run exactly once per unique message_id (2 total),
     # not once per sync (which would be 4) — proves the 2nd login didn't reclassify.
     assert mock_categorize.call_count == 2
+
+
+@patch("app.api.endpoints.emails.categorize_email")
+@patch("app.api.endpoints.emails.is_outlook_connected", return_value=False)
+@patch("app.services.gmail_service._load_gmail_token_from_db")
+@patch("app.api.endpoints.emails.GmailService")
+def test_stale_cursor_recovery_updates_existing_sync_state_row(
+    mock_gmail_cls, mock_load_token, _mock_outlook, mock_categorize, registered_user
+):
+    """
+    Regression test for a bug flagged during #114's QA pass (Copilot review on #102):
+    when fetch_history_since() raises (e.g. an expired/stale Gmail historyId — Gmail
+    only retains ~1 week of history) on a user who already has a SyncState row, the
+    code used to null out the local `gmail_sync` reference to force the full-fetch
+    fallback path. But the fallback's cursor-persist step only checked "if gmail_sync"
+    to decide between updating vs. inserting a new SyncState row — with the reference
+    nulled, it always tried to INSERT a second row for the same (user_id, provider),
+    violating the uq_sync_state_user_provider unique constraint at commit time.
+    """
+    from app.api.endpoints.emails import sync_user_emails_background
+
+    user_id = registered_user
+    mock_load_token.return_value = ("fake_token", "user@gmail.com")
+
+    mock_svc = MagicMock()
+    mock_gmail_cls.return_value = mock_svc
+    mock_svc.authenticate_for_user.return_value = True
+    mock_categorize.return_value = "info"
+
+    with patch("app.db.database.SessionLocal", TestSessionLocal):
+        # First sync: establishes a SyncState row with a cursor.
+        mock_svc.fetch_email_page.return_value = (_MOCK_MAILBOX, None)
+        mock_svc.get_history_id.return_value = "history-100"
+        sync_user_emails_background(user_id)
+
+        # Second sync: the stored cursor is now stale/expired -> fetch_history_since
+        # raises, forcing the full-fetch fallback while a SyncState row already exists.
+        mock_svc.fetch_history_since.side_effect = Exception("404: historyId too old")
+        mock_svc.fetch_email_page.return_value = ([], None)
+        mock_svc.get_history_id.return_value = "history-200"
+        sync_user_emails_background(user_id)  # must not raise an IntegrityError internally
+
+    db = TestSessionLocal()
+    try:
+        sync_states = db.query(SyncState).filter(
+            SyncState.user_id == user_id, SyncState.provider == "gmail"
+        ).all()
+        assert len(sync_states) == 1, "Stale-cursor recovery must update the existing row, not insert a duplicate"
+        assert sync_states[0].cursor == "history-200"
+    finally:
+        db.close()

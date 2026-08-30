@@ -552,17 +552,23 @@ def sync_user_emails_background(user_id: int) -> None:
                 )
                 raw_list: list[dict] = []
                 next_cursor: str | None = None
+                needs_full_fetch = not gmail_sync or not gmail_sync.cursor
                 if gmail_sync and gmail_sync.cursor:
                     try:
                         raw_list, next_cursor = svc.fetch_history_since(gmail_sync.cursor, limit=50)
                     except Exception:
+                        # Keep the gmail_sync row reference intact (just its cursor is
+                        # stale) — nulling it out here previously caused the code below
+                        # to think no row existed yet and try to INSERT a second one,
+                        # violating uq_sync_state_user_provider at commit time instead
+                        # of just updating the existing row's cursor in place.
                         logger.warning(
                             "Gmail history sync stale/failed for user_id=%d, falling back to full fetch",
                             user_id,
                         )
-                        gmail_sync = None  # force full-fetch fallback below
+                        needs_full_fetch = True
 
-                if not gmail_sync or not gmail_sync.cursor:
+                if needs_full_fetch:
                     raw_list, _next_page_token = svc.fetch_email_page(page_token=None, limit=50)
                     next_cursor = svc.get_history_id()
 

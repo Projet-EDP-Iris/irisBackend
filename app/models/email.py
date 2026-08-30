@@ -23,7 +23,7 @@ class Email(Base):
     # Identifiants techniques
     id = Column(Integer, primary_key=True, index=True)
     message_id = Column(String, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
 
     # Contenu brut de l'email
     subject = Column(String)

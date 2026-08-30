@@ -2,18 +2,31 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import get_db
 from app.main import app
 from app.models.base import Base
+from app.models.email import Email
+from app.models.processing_state import ProcessingState
 from app.models.user import User
 
 # Create a test database engine (in-memory SQLite)
 TEST_DATABASE_URL = "sqlite:///./test.db"
 test_engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
 TestSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
+
+
+# SQLite ignores foreign key constraints by default, which is why the
+# delete_user cascade bug (see test_delete_user_cascades_associated_data
+# below) went undetected — this makes the test suite actually enforce them,
+# matching real PostgreSQL behavior.
+@event.listens_for(test_engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, _):
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 # Override the get_db dependency
 def override_get_db():
@@ -489,6 +502,53 @@ def test_admin_can_delete_other_user():
         headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 204
+
+
+def test_delete_user_cascades_associated_data():
+    """
+    Regression test for a GDPR right-to-erasure bug found while writing the
+    dossier technique's security document: emails.user_id, processing_state.user_id
+    and sync_state.user_id lacked ON DELETE CASCADE, so on real PostgreSQL
+    (which enforces foreign keys, unlike SQLite by default) deleting a user
+    with any associated row in those tables failed with a foreign-key
+    violation — no active user could actually delete their account.
+
+    This test enables SQLite's foreign key enforcement (see
+    _enable_sqlite_foreign_keys above) specifically so it catches what the
+    rest of this file's SQLite-backed tests would otherwise miss, and
+    confirms deleting a user with an associated email + processing_state row
+    both succeeds and actually removes those rows (not just the user).
+    """
+    create_response = _create_verified_user(TEST_USER_EMAIL, TEST_USER_PASSWORD)
+    user_id = create_response.json()["id"]
+
+    db = TestSessionLocal()
+    try:
+        db.add(Email(user_id=user_id, message_id="msg_1", subject="Test", body="Body"))
+        db.add(ProcessingState(user_id=user_id, is_active=True))
+        db.commit()
+    finally:
+        db.close()
+
+    login_response = client.post(
+        f"{BASE}/login",
+        json={"email": TEST_USER_EMAIL, "password": TEST_USER_PASSWORD},
+    )
+    token = login_response.json()["access_token"]
+
+    response = client.delete(
+        f"{BASE}/{user_id}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 204
+
+    db = TestSessionLocal()
+    try:
+        assert db.query(User).filter(User.id == user_id).first() is None
+        assert db.query(Email).filter(Email.user_id == user_id).first() is None
+        assert db.query(ProcessingState).filter(ProcessingState.user_id == user_id).first() is None
+    finally:
+        db.close()
 
 
 class TestCaptcha:

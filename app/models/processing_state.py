@@ -14,5 +14,5 @@ class ProcessingState(Base, TimestampMixin):
     __tablename__ = "processing_state"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=False)

@@ -469,3 +469,78 @@ def test_remind_returns_partial_provider_message(
     assert response.json()["message"] == "Rappel créé (google) — échec sur outlook."
     assert response.json()["providers"][1]["error"] == "Impossible de créer le rappel avec ce service"
     mock_google_task.assert_called_once()
+
+
+# --- resort: user flags a wrong category, Iris tries the next-best guess ---
+
+
+def _seed_email_with_body(user_email: str, message_id: str, category: str, subject: str, body: str) -> int:
+    db = TestSessionLocal()
+    try:
+        user = db.query(User).filter_by(email=user_email).first()
+        email = Email(
+            subject=subject, body=body, message_id=message_id,
+            user_id=user.id, status="fetched", category=category,
+        )
+        db.add(email)
+        db.commit()
+        db.refresh(email)
+        return email.id
+    finally:
+        db.close()
+
+
+def test_resort_unauthorized(client_with_db, setup_database):
+    r = client_with_db.post("/api/v1/emails/1/resort")
+    assert r.status_code == 403
+
+
+def test_resort_not_found_returns_404(client_with_db, setup_database, auth_headers):
+    r = client_with_db.post("/api/v1/emails/999999/resort", headers=auth_headers)
+    assert r.status_code == 404
+
+
+def test_resort_rejects_uncategorized_email(client_with_db, setup_database, auth_headers):
+    email_id = _seed_email("emails@example.com", "resort_none", category=None)
+    r = client_with_db.post(f"/api/v1/emails/{email_id}/resort", headers=auth_headers)
+    assert r.status_code == 400
+    assert "no category" in r.json()["detail"]
+
+
+def test_resort_moves_to_matching_category(client_with_db, setup_database, auth_headers):
+    """Seeded as the wrong category (bonsplans) with body text that clearly
+    matches the action-required regex — resort should move it to 'action'."""
+    email_id = _seed_email_with_body(
+        "emails@example.com", "resort_action", "bonsplans",
+        subject="Contract review",
+        body="Action required: please confirm and sign before Friday.",
+    )
+    r = client_with_db.post(f"/api/v1/emails/{email_id}/resort", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json() == {"email_id": email_id, "category": "action"}
+
+
+def test_resort_cycles_without_repeating_until_all_five_tried(client_with_db, setup_database, auth_headers):
+    """An email with no regex signal in any category falls back to a fixed
+    rotation — repeated resorts must never repeat a category already tried
+    in this run, cycling through all 5 before any repeat occurs."""
+    email_id = _seed_email_with_body(
+        "emails@example.com", "resort_cycle", "rdv",
+        subject="build failed for irisBackend",
+        body="We encountered an error during the build process. Exited with status 1.",
+    )
+    seen = []
+    category = "rdv"
+    for _ in range(5):
+        r = client_with_db.post(f"/api/v1/emails/{email_id}/resort", headers=auth_headers)
+        assert r.status_code == 200
+        category = r.json()["category"]
+        assert category not in seen, f"repeated {category} before cycling through all 5"
+        seen.append(category)
+    assert set(seen) == {"rdv", "action", "attente", "bonsplans", "info"}
+
+    # A 6th call has exhausted every option and must reset the cycle rather
+    # than get stuck — it's allowed to repeat now that all 5 have been seen.
+    r = client_with_db.post(f"/api/v1/emails/{email_id}/resort", headers=auth_headers)
+    assert r.status_code == 200
+    assert r.json()["category"] in seen

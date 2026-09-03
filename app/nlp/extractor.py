@@ -33,6 +33,7 @@ import re
 from datetime import datetime
 
 from app.core.config import settings
+from app.nlp.preprocessor import truncate_email
 from app.schemas.detection import (
     Classification,
     EmailInput,
@@ -362,6 +363,42 @@ def classification_to_category(classification: str) -> str:
     if classification in ("action", "attente", "bonsplans", "info"):
         return classification
     return "info"  # covers "other" and any unknown future value
+
+
+_ALL_CATEGORIES = ["rdv", "action", "attente", "bonsplans", "info"]
+
+
+def resort_category(
+    subject: str, body: str, current_category: str, previously_excluded: list[str]
+) -> tuple[str, list[str]]:
+    """Re-score an email, excluding its current category plus every category
+    already tried and rejected for it, and return the next-best category from
+    the same regex signal already used for the original classification.
+
+    Returns (new_category, updated_excluded_list) -- the caller persists the
+    updated list so the next resort continues the cycle instead of repeating
+    an already-rejected category. Once every category has been excluded, the
+    cycle resets (keeping only the current one) so repeated clicks keep
+    rotating through all 5 rather than getting stuck with nothing left.
+    """
+    excluded = set(previously_excluded) | {current_category}
+    if len(excluded) >= len(_ALL_CATEGORIES):
+        excluded = {current_category}
+
+    text = truncate_email(subject, body)
+    scores = _apply_rdv_hierarchy(dict(_score_categories(text)))
+    by_ui_category: dict[str, float] = {}
+    for classification, score in scores.items():
+        cat = classification_to_category(classification)
+        if cat not in excluded:
+            by_ui_category[cat] = max(by_ui_category.get(cat, 0), score)
+
+    new_category = (
+        max(by_ui_category, key=by_ui_category.get)
+        if by_ui_category
+        else next(c for c in _ALL_CATEGORIES if c not in excluded)
+    )
+    return new_category, sorted(excluded)
 
 
 def _extract_times(text: str) -> list[TimeWindow]:

@@ -23,6 +23,7 @@ from app.schemas.email import (
     FetchDetectPredictResponse,
 )
 from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
+from app.nlp.extractor import resort_category
 from app.services.detection import categorize_email, detect_batch, enrich_batch
 from app.services.gmail_service import GmailService
 from app.services.google_tasks_service import create_google_task
@@ -724,6 +725,38 @@ def mark_email_read(
     db.commit()
 
     return {"status": "read", "email_id": email_id, "is_done": record.is_done}
+
+
+@router.post("/emails/{email_id}/resort")
+def resort_email(
+    email_id: int,
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+) -> dict:
+    """User flags this email as sorted into the wrong category. Re-scores it
+    against the other categories, excluding the current one plus any already
+    tried on this email, and moves it there."""
+    record = (
+        db.query(Email)
+        .filter(Email.id == email_id, Email.user_id == current_user.id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Email not found")
+    if not record.category:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email has no category to correct")
+
+    extraction_data = dict(record.extraction_data or {})
+    previously_excluded = extraction_data.get("resort_excluded", [])
+    new_category, updated_excluded = resort_category(
+        record.subject or "", record.body or "", record.category, previously_excluded
+    )
+    record.category = new_category
+    extraction_data["resort_excluded"] = updated_excluded
+    record.extraction_data = extraction_data
+    db.commit()
+
+    return {"email_id": email_id, "category": new_category}
 
 
 class _ReminderProviderResult(BaseModel):

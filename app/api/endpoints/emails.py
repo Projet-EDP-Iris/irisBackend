@@ -606,7 +606,20 @@ def sync_user_emails_background(user_id: int) -> None:
                     .first()
                 )
                 delta_link = outlook_sync.cursor if outlook_sync else None
-                outlook_page, new_delta_link = fetch_outlook_delta(user_id, delta_link=delta_link, limit=50)
+                try:
+                    outlook_page, new_delta_link = fetch_outlook_delta(user_id, delta_link=delta_link, limit=50)
+                except Exception:
+                    if not delta_link:
+                        raise
+                    # Same self-heal as Gmail's historyId handling above: a stale or
+                    # expired deltaLink (Graph 410 resyncRequired, or any other
+                    # failure) would otherwise fail identically forever, since the
+                    # bad cursor is never replaced — fall back to a fresh baseline.
+                    logger.warning(
+                        "Outlook delta sync stale/failed for user_id=%d, falling back to full resync",
+                        user_id,
+                    )
+                    outlook_page, new_delta_link = fetch_outlook_delta(user_id, delta_link=None, limit=50)
 
                 for it in outlook_page:
                     category = existing_categories.get(it.message_id)

@@ -65,7 +65,7 @@ python-dotenv==1.2.2
 python-jose[cryptography]==3.5.0
 python-multipart
 pytz==2026.1.post1
-regex==2026.4.4
+regex==2026.8.31
 requests==2.33.1
 requests-oauthlib==2.0.0
 rich==14.3.3

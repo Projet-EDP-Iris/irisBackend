@@ -14,6 +14,7 @@ from app.core.auth import get_current_active_user
 from app.db.database import get_db
 from app.models.email import Email
 from app.models.user import User
+from app.nlp.extractor import resort_category
 from app.schemas.detection import EmailInput as DetectionEmailInput
 from app.schemas.detection import ExtractionResult
 from app.schemas.email import (
@@ -23,7 +24,6 @@ from app.schemas.email import (
     FetchDetectPredictResponse,
 )
 from app.schemas.prediction import CalendarAvailability, PredictionStatus, UserPreferences
-from app.nlp.extractor import resort_category
 from app.services.detection import categorize_email, detect_batch, enrich_batch
 from app.services.gmail_service import GmailService
 from app.services.google_tasks_service import create_google_task

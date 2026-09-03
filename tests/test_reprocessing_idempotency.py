@@ -210,3 +210,48 @@ def test_stale_cursor_recovery_updates_existing_sync_state_row(
         assert sync_states[0].cursor == "history-200"
     finally:
         db.close()
+
+
+@patch("app.api.endpoints.emails.categorize_email")
+@patch("app.api.endpoints.emails.fetch_outlook_delta")
+@patch("app.api.endpoints.emails.is_outlook_connected", return_value=True)
+@patch("app.services.gmail_service._load_gmail_token_from_db", return_value=None)
+def test_outlook_stale_delta_link_recovery_updates_existing_sync_state_row(
+    _mock_load_token, _mock_outlook_connected, mock_fetch_delta, mock_categorize, registered_user
+):
+    """
+    Outlook counterpart to test_stale_cursor_recovery_updates_existing_sync_state_row
+    above: an expired/invalid @odata.deltaLink (Microsoft Graph 410 resyncRequired,
+    or any other failure) must fall back to a fresh delta baseline instead of
+    failing identically on every future sync forever.
+    """
+    from app.api.endpoints.emails import sync_user_emails_background
+
+    user_id = registered_user
+    mock_categorize.return_value = "info"
+
+    with patch("app.db.database.SessionLocal", TestSessionLocal):
+        # First sync: establishes a SyncState row with a deltaLink cursor.
+        mock_fetch_delta.return_value = ([], "delta-100")
+        sync_user_emails_background(user_id)
+
+        # Second sync: the stored deltaLink is now stale/expired -> the first call
+        # raises, forcing a full-baseline retry (delta_link=None) that succeeds.
+        mock_fetch_delta.side_effect = [
+            Exception("410: resyncRequired"),
+            ([], "delta-200"),
+        ]
+        sync_user_emails_background(user_id)  # must not raise an IntegrityError internally
+
+    db = TestSessionLocal()
+    try:
+        sync_states = db.query(SyncState).filter(
+            SyncState.user_id == user_id, SyncState.provider == "outlook"
+        ).all()
+        assert len(sync_states) == 1, "Stale-cursor recovery must update the existing row, not insert a duplicate"
+        assert sync_states[0].cursor == "delta-200"
+    finally:
+        db.close()
+    # Confirm the retry actually happened with a fresh baseline (delta_link=None),
+    # not a repeat of the same stale cursor.
+    assert mock_fetch_delta.call_args_list[-1].kwargs["delta_link"] is None

@@ -23,10 +23,12 @@ import logging
 import os
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from fastapi.responses import RedirectResponse
+from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_active_user
+from app.db.database import get_db
 from app.models.user import User
 from app.services.microsoft_oauth_service import exchange_code_for_token, get_auth_url
 from app.services.outlook_email_service import get_outlook_connection_status
@@ -120,3 +122,17 @@ def microsoft_oauth_callback(
     background_tasks.add_task(sync_user_emails_background, user_id)
 
     return RedirectResponse(url=_build_frontend_redirect("success"))
+
+
+@router.delete(
+    "/auth/microsoft",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Disconnect Outlook — removes stored OAuth token",
+)
+def disconnect_microsoft(
+    current_user: User = Depends(get_current_active_user),
+    db: Session = Depends(get_db),
+):
+    current_user.outlook_oauth_token = None
+    current_user.outlook_email = None
+    db.commit()
